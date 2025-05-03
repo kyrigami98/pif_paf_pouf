@@ -47,29 +47,76 @@ class NearbyService {
 
   Future<bool> checkPermissions() async {
     try {
-      Map<Permission, PermissionStatus> statuses =
-          await [
-            Permission.location,
-            Permission.bluetoothScan,
-            Permission.bluetoothConnect,
-            Permission.bluetoothAdvertise,
-            Permission.storage,
-          ].request();
+      // 1. Vérifier d'abord si les permissions sont déjà accordées
+      bool locationGranted = await Permission.location.isGranted;
+      bool bluetoothScanGranted = await Permission.bluetoothScan.isGranted;
+      bool bluetoothConnectGranted = await Permission.bluetoothConnect.isGranted;
+      bool bluetoothAdvertiseGranted = await Permission.bluetoothAdvertise.isGranted;
+      bool storageGranted = await Permission.storage.isGranted;
 
-      bool allGranted = true;
-      statuses.forEach((permission, status) {
-        debugPrint('${permission.toString()}: ${status.toString()}');
-        if (!status.isGranted) {
-          allGranted = false;
+      // Permission supplémentaire pour Android 12+
+      bool nearbyWifiGranted = true;
+      AndroidDeviceInfo? androidInfo;
+      try {
+        androidInfo = await _deviceInfo.androidInfo;
+        if (androidInfo.version.sdkInt >= 31) {
+          // Android 12 (API 31) et plus
+          nearbyWifiGranted = await Permission.nearbyWifiDevices.isGranted;
         }
-      });
+      } catch (e) {
+        debugPrint('Erreur lors de la récupération des infos Android: $e');
+      }
 
-      // Vérifier si le service de localisation est activé
-      bool serviceEnabled = await _location.serviceEnabled();
+      // 2. Si toutes les permissions ne sont pas accordées, les demander
+      if (!locationGranted ||
+          !bluetoothScanGranted ||
+          !bluetoothConnectGranted ||
+          !bluetoothAdvertiseGranted ||
+          !storageGranted ||
+          !nearbyWifiGranted) {
+        List<Permission> permissionsToRequest = [
+          Permission.location,
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          Permission.bluetoothAdvertise,
+          Permission.bluetooth,
+          Permission.storage,
+        ];
 
-      debugPrint('Permissions - Toutes accordées: $allGranted, Service localisation: $serviceEnabled');
+        // Ajouter nearbyWifiDevices uniquement pour Android 12+
+        if (androidInfo != null && androidInfo.version.sdkInt >= 31) {
+          permissionsToRequest.add(Permission.nearbyWifiDevices);
+        }
 
-      return allGranted && serviceEnabled;
+        Map<Permission, PermissionStatus> statuses = await permissionsToRequest.request();
+
+        bool allGranted = true;
+        statuses.forEach((permission, status) {
+          debugPrint('${permission.toString()}: ${status.toString()}');
+          if (!status.isGranted) {
+            allGranted = false;
+          }
+        });
+
+        if (!allGranted) {
+          debugPrint('Certaines permissions n\'ont pas été accordées');
+          return false;
+        }
+      }
+
+      // 3. Vérifier si les services sont activés
+      // 3.1 Service de localisation
+      bool locationServiceEnabled = await _location.serviceEnabled();
+      if (!locationServiceEnabled) {
+        locationServiceEnabled = await _location.requestService();
+        if (!locationServiceEnabled) {
+          debugPrint('Service de localisation désactivé');
+          return false;
+        }
+      }
+
+      debugPrint('Permissions - Toutes accordées, Service localisation: $locationServiceEnabled');
+      return true;
     } catch (e) {
       debugPrint('Erreur lors de la vérification des permissions: $e');
       return false;
