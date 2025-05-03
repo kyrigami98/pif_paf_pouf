@@ -45,5 +45,20 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Nous avons besoin du Bluetooth pour vous connecter aux joueurs à proximité</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Nous avons besoin du Bluetooth pour vous connecter aux joueurs à proximité</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Nous avons besoin de votre localisation pour trouver des joueurs à proximité</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Nous avons besoin de votre localisation pour trouver des joueurs à proximité</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Nous utilisons les capteurs de mouvement pour détecter les mouvements du jeu</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 </dict>
 </plist>

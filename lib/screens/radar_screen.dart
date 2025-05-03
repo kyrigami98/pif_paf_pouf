@@ -31,6 +31,7 @@ class _RadarScreenState extends State<RadarScreen> with SingleTickerProviderStat
 
   // Pour suivre les appareils qui ont reçu le tchin
   final Set<String> _tchinReceivedFrom = {};
+  final int _tchinTimeoutMs = 3000; // Temps maximum pour considérer un tchin valide
 
   @override
   void initState() {
@@ -125,21 +126,40 @@ class _RadarScreenState extends State<RadarScreen> with SingleTickerProviderStat
 
     setState(() {
       _isTchining = true;
-      _statusMessage = "TCHIN détecté! Envoi du signal...";
+      _statusMessage = "TCHIN détecté! Recherche d'appareils proches...";
     });
 
     try {
+      // Vérifier d'abord s'il y a des appareils suffisamment proches
+      final nearbyDevices =
+          _nearbyService.nearbyDevices.where((d) => d['connected'] == true && (d['distance'] as double? ?? 3.0) <= 1.0).toList();
+
+      if (nearbyDevices.isEmpty) {
+        setState(() {
+          _statusMessage = "Aucun appareil assez proche pour un TCHIN!";
+        });
+
+        // Fin de l'état de tchin après un court délai
+        Future.delayed(const Duration(seconds: 1), () {
+          setState(() {
+            _isTchining = false;
+            _statusMessage = "Radar actif - Rapprochez-vous d'un autre joueur";
+          });
+        });
+        return;
+      }
+
       // Envoyer le signal à tous les appareils connectés
       await _nearbyService.sendTchinSignal();
 
       // Vérifier après un délai si on a reçu des réponses
-      Future.delayed(const Duration(seconds: 2), () {
+      Future.delayed(Duration(milliseconds: _tchinTimeoutMs), () {
         if (_tchinReceivedFrom.isNotEmpty) {
           _handleSuccessfulTchin();
         } else {
           setState(() {
             _isTchining = false;
-            _statusMessage = "Aucun appareil n'a répondu au TCHIN. Réessayez!";
+            _statusMessage = "Essayez à nouveau de cogner les téléphones ensemble";
           });
         }
       });
