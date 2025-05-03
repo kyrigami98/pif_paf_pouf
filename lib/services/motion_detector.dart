@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:vibration/vibration.dart';
 
 class MotionDetector {
   static final MotionDetector _instance = MotionDetector._internal();
@@ -82,9 +82,7 @@ class MotionDetector {
   }
 
   Future<void> _vibrate() async {
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 150);
-    }
+    HapticFeedback.vibrate();
   }
 
   void dispose() {

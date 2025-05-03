@@ -54,6 +54,7 @@ class DefaultFirebaseOptions {
     appId: '1:425870607429:android:dd7d64b4359d9faf5c0f2c',
     messagingSenderId: '425870607429',
     projectId: 'pif-paf-pouf-7694b',
+    databaseURL: 'https://pif-paf-pouf-7694b-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'pif-paf-pouf-7694b.firebasestorage.app',
   );
 
@@ -62,7 +63,9 @@ class DefaultFirebaseOptions {
     appId: '1:425870607429:ios:35ca8ed8c963e56b5c0f2c',
     messagingSenderId: '425870607429',
     projectId: 'pif-paf-pouf-7694b',
+    databaseURL: 'https://pif-paf-pouf-7694b-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'pif-paf-pouf-7694b.firebasestorage.app',
     iosBundleId: 'com.example.pifPafPouf',
   );
+
 }
