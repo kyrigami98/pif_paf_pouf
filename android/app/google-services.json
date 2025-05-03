@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "425870607429",
+    "firebase_url": "https://pif-paf-pouf-7694b-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "pif-paf-pouf-7694b",
+    "storage_bucket": "pif-paf-pouf-7694b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:425870607429:android:dd7d64b4359d9faf5c0f2c",
+        "android_client_info": {
+          "package_name": "com.example.pif_paf_pouf"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjdsmDEzfdGbAA_zLHvsml_ZWp7FOnx_A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
