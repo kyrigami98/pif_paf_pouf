@@ -230,9 +230,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [_buildChoiceCard(Choice.pierre), _buildChoiceCard(Choice.papier), _buildChoiceCard(Choice.ciseaux)],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [_buildChoiceCard(Choice.pierre), _buildChoiceCard(Choice.papier), _buildChoiceCard(Choice.ciseaux)],
+          ),
         ),
         const SizedBox(height: 24),
         AnimatedBuilder(
