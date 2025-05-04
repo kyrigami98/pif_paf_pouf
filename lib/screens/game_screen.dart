@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lottie/lottie.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
-import 'package:pif_paf_pouf/services/firebase_service.dart';
 import 'package:pif_paf_pouf/models/models.dart';
+import 'package:pif_paf_pouf/services/firebase_service.dart';
 import 'package:pif_paf_pouf/theme/colors.dart';
-import 'dart:async';
-import 'package:lottie/lottie.dart';
 
 class GameScreen extends StatefulWidget {
   final String roomId;
@@ -21,239 +19,112 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
-  String? _currentUserId;
-  Choice? _selectedChoice;
-  bool _choiceLocked = false;
-  bool _showResults = false;
-  int _currentRound = 1;
+
+  // Variables d'état du jeu
   Room? _room;
-  List<Player> _players = [];
+  String? _currentUserId;
+  Player? _currentPlayer;
+  List<Player> _activePlayers = [];
   RoundResult? _roundResult;
+  bool _showResults = false;
 
-  // Animation pour le compte à rebours
-  late AnimationController _countdownController;
-  late Animation<double> _countdownAnimation;
-  late Animation<double> _pulseAnimation;
-  final List<String> _countdownTexts = ['Pif...', 'Paf...', 'Pouf!'];
-  int _countdownIndex = 0;
-  bool _countdownActive = false;
-
-  // Animation pour les résultats
-  late AnimationController _resultsController;
-  late Animation<double> _resultsAnimation;
-
-  // Animation pour les choix
-  late AnimationController _choiceController;
-  late Animation<double> _choiceAnimation;
-
-  // Streams subscriptions
-  StreamSubscription? _roomSubscription;
-  StreamSubscription? _playersSubscription;
-  StreamSubscription? _roundResultSubscription;
+  // Animations
+  late AnimationController _cardAnimController;
+  late AnimationController _resultAnimController;
+  late AnimationController _countdownAnimController;
+  Choice? _selectedChoice;
+  bool _choiceConfirmed = false;
 
   @override
   void initState() {
     super.initState();
-    _initialize();
+    _currentUserId = _firebaseService.getCurrentUserId();
 
-    // Initialiser l'animation de compte à rebours
-    _countdownController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000))
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          if (_countdownIndex < _countdownTexts.length - 1) {
-            _countdownIndex++;
-            _countdownController.reset();
-            _countdownController.forward();
-          } else if (_countdownIndex == _countdownTexts.length - 1) {
-            // Après "Pouf!", on peut choisir
-            setState(() {
-              _countdownActive = false;
-              _choiceLocked = false;
-            });
-            // Vibrer pour indiquer que c'est le moment de choisir
-            HapticFeedback.heavyImpact();
-            // Démarrer l'animation des choix
-            _choiceController.forward();
-          }
-        }
-      });
+    // Initialiser les contrôleurs d'animation
+    _cardAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
 
-    _countdownAnimation = CurvedAnimation(parent: _countdownController, curve: Curves.elasticOut);
-    _pulseAnimation = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 1.2), weight: 1),
-      TweenSequenceItem(tween: Tween<double>(begin: 1.2, end: 1.0), weight: 1),
-    ]).animate(CurvedAnimation(parent: _countdownController, curve: const Interval(0.5, 1.0, curve: Curves.easeInOut)));
+    _resultAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
 
-    // Initialiser l'animation des résultats
-    _resultsController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
-    _resultsAnimation = CurvedAnimation(parent: _resultsController, curve: Curves.elasticOut);
+    _countdownAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 3));
 
-    // Initialiser l'animation des choix
-    _choiceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-    _choiceAnimation = CurvedAnimation(parent: _choiceController, curve: Curves.easeOutBack);
+    _countdownAnimController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && _selectedChoice != null && !_choiceConfirmed) {
+        _confirmChoice(_selectedChoice!);
+      }
+    });
+
+    // Charger les données initiales
+    _loadInitialData();
   }
 
   @override
   void dispose() {
-    _roomSubscription?.cancel();
-    _playersSubscription?.cancel();
-    _roundResultSubscription?.cancel();
-    _countdownController.dispose();
-    _resultsController.dispose();
-    _choiceController.dispose();
+    _cardAnimController.dispose();
+    _resultAnimController.dispose();
+    _countdownAnimController.dispose();
     super.dispose();
   }
 
-  Future<void> _initialize() async {
-    final userId = _firebaseService.getCurrentUserId();
-    if (userId != null) {
-      setState(() {
-        _currentUserId = userId;
-      });
-    }
-
-    // S'abonner aux changements de la room
-    _subscribeToRoom();
-
-    // S'abonner aux changements des joueurs
-    _subscribeToPlayers();
-  }
-
-  void _subscribeToRoom() {
-    _roomSubscription = _firebaseService
-        .roomStream(widget.roomId)
-        .listen(
-          (room) {
-            if (mounted) {
-              setState(() {
-                _room = room;
-
-                // Si le numéro de round a changé, réinitialiser l'état
-                if (_room!.currentRound != _currentRound) {
-                  _currentRound = _room!.currentRound;
-                  _selectedChoice = null;
-                  _choiceLocked = false;
-                  _showResults = false;
-                  _roundResult = null;
-
-                  // Annuler l'ancienne subscription au round et en créer une nouvelle
-                  _roundResultSubscription?.cancel();
-                  _subscribeToRoundResult();
-
-                  // Commencer le compte à rebours pour le nouveau round
-                  _startCountdown();
-                }
-
-                // Vérifier s'il y a un gagnant final
-                if (_room!.winner != null && _room!.status == RoomStatus.completed) {
-                  setState(() {
-                    _showResults = true;
-                  });
-                  _resultsController.forward();
-                }
-              });
-            }
-          },
-          onError: (e) {
-            debugPrint('Erreur dans le stream de room: $e');
-            if (mounted) {
-              _showErrorMessage("Erreur de connexion avec la partie");
-            }
-          },
-        );
-  }
-
-  void _subscribeToPlayers() {
-    _playersSubscription = _firebaseService
-        .playersStream(widget.roomId)
-        .listen(
-          (players) {
-            if (mounted) {
-              setState(() {
-                _players = players;
-              });
-            }
-          },
-          onError: (e) {
-            debugPrint('Erreur dans le stream de joueurs: $e');
-          },
-        );
-  }
-
-  void _subscribeToRoundResult() {
-    _roundResultSubscription = _firebaseService
-        .roundResultStream(widget.roomId, _currentRound)
-        .listen(
-          (result) {
-            if (result != null && result.completed && !_showResults && mounted) {
-              setState(() {
-                _roundResult = result;
-                _showResults = true;
-              });
-              _resultsController.forward();
-              HapticFeedback.mediumImpact();
-            }
-          },
-          onError: (e) {
-            debugPrint('Erreur dans le stream du résultat de round: $e');
-          },
-        );
-  }
-
-  void _startCountdown() {
-    setState(() {
-      _countdownIndex = 0;
-      _countdownActive = true;
-      _choiceLocked = true;
-    });
-
-    // Réinitialiser les animations
-    _countdownController.reset();
-    _choiceController.reset();
-    _countdownController.forward();
-  }
-
-  Future<void> _makeChoice(Choice choice) async {
-    if (_choiceLocked || _showResults || _selectedChoice != null) return;
-
-    setState(() {
-      _selectedChoice = choice;
-      _choiceLocked = true;
-    });
-
+  Future<void> _loadInitialData() async {
     try {
-      // Donner un feedback tactile à la sélection
-      HapticFeedback.selectionClick();
-
-      // Envoyer le choix à Firebase sous forme de string
-      await _firebaseService.makeChoice(widget.roomId, _currentUserId!, choice.name);
-
-      // Vérifier si tous les joueurs ont fait leur choix
-      bool allMadeChoice = await _firebaseService.checkAllChoicesMade(widget.roomId);
-
-      if (allMadeChoice) {
-        // Déterminer le gagnant si tous les joueurs ont choisi
-        await _firebaseService.determineWinner(widget.roomId);
+      final room = await _firebaseService.getRoom(widget.roomId);
+      if (mounted) {
+        setState(() {
+          _room = room;
+          if (room != null) {
+            _activePlayers = room.players.where((p) => p.isActive).toList();
+            _currentPlayer = _activePlayers.firstWhere((p) => p.id == _currentUserId, orElse: () => _activePlayers.first);
+          }
+        });
       }
     } catch (e) {
-      _showErrorMessage("Erreur: $e");
+      _showErrorMessage("Erreur de chargement: $e");
+    }
+  }
+
+  // Sélection d'un choix (pierre, papier, ciseaux)
+  void _selectChoice(Choice choice) {
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _selectedChoice = choice;
+    });
+
+    _cardAnimController.reset();
+    _cardAnimController.forward();
+
+    // Démarrer le compte à rebours pour la confirmation automatique
+    _countdownAnimController.reset();
+    _countdownAnimController.forward();
+  }
+
+  // Confirmer un choix
+  Future<void> _confirmChoice(Choice choice) async {
+    if (_choiceConfirmed || _room == null || _currentUserId == null) return;
+
+    setState(() {
+      _choiceConfirmed = true;
+      _countdownAnimController.stop();
+    });
+
+    HapticFeedback.heavyImpact();
+
+    try {
+      await _firebaseService.makeChoice(widget.roomId, _currentUserId!, choice.name);
+    } catch (e) {
+      _showErrorMessage("Erreur lors de la confirmation: $e");
       setState(() {
-        _selectedChoice = null;
-        _choiceLocked = false;
+        _choiceConfirmed = false;
       });
     }
   }
 
   Future<void> _readyForNextRound() async {
     try {
-      // Donner un feedback tactile
-      HapticFeedback.mediumImpact();
-
-      // Réinitialiser l'état local
       setState(() {
-        _selectedChoice = null;
         _showResults = false;
         _roundResult = null;
+        _selectedChoice = null;
+        _choiceConfirmed = false;
       });
 
       // Marquer comme prêt pour le prochain round
@@ -281,14 +152,311 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _showInfoMessage(String message) {
-    alertKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(8),
+  // Détermine si le joueur actuel est un survivant/toujours en jeu
+  bool _isCurrentPlayerActive() {
+    if (_room == null || _currentUserId == null) return false;
+
+    // Si nous avons des survivants spécifiques, vérifier si le joueur en fait partie
+    if (_room!.survivors != null && _room!.survivors!.isNotEmpty) {
+      return _room!.survivors!.contains(_currentUserId);
+    }
+
+    // Autrement, considérer que tout le monde est actif
+    return true;
+  }
+
+  // Construire l'UI pour le choix du joueur
+  Widget _buildChoiceUI() {
+    final isActive = _isCurrentPlayerActive();
+
+    if (!isActive) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Lottie.asset('assets/lottie/eliminated.json', width: 150, height: 150),
+            const Text(
+              "Vous avez été éliminé !",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Regardez la suite du jeu en spectateur",
+              style: TextStyle(fontSize: 16, color: AppColors.textMuted),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_choiceConfirmed) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_selectedChoice != null) ...[
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: _selectedChoice!.color.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(60),
+                ),
+                child: Center(child: Text(_selectedChoice!.emoji, style: const TextStyle(fontSize: 60))),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                "Vous avez choisi ${_selectedChoice!.displayName}",
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 32),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text("En attente des autres joueurs...", style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
+            ],
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          "Faites votre choix",
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [_buildChoiceCard(Choice.pierre), _buildChoiceCard(Choice.papier), _buildChoiceCard(Choice.ciseaux)],
+        ),
+        const SizedBox(height: 24),
+        AnimatedBuilder(
+          animation: _countdownAnimController,
+          builder: (context, child) {
+            final progress = 1 - _countdownAnimController.value;
+            return Column(
+              children: [
+                LinearProgressIndicator(
+                  value: progress,
+                  backgroundColor: Colors.grey.shade300,
+                  color: _getProgressColor(progress),
+                  minHeight: 10,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Choix automatique dans ${(3 * progress).ceil()} secondes",
+                  style: TextStyle(fontSize: 14, color: _getProgressColor(progress)),
+                ),
+              ],
+            );
+          },
+        ),
+        if (_selectedChoice != null) ...[
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: () => _confirmChoice(_selectedChoice!),
+            icon: const Icon(Icons.check_circle),
+            label: const Text("CONFIRMER"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _selectedChoice!.color,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Color _getProgressColor(double progress) {
+    if (progress > 0.6) return Colors.green;
+    if (progress > 0.3) return Colors.orange;
+    return Colors.red;
+  }
+
+  // Construire une carte de choix (pierre, papier, ciseaux)
+  Widget _buildChoiceCard(Choice choice) {
+    final isSelected = _selectedChoice == choice;
+
+    return AnimatedScale(
+      scale: isSelected ? 1.1 : 1.0,
+      duration: const Duration(milliseconds: 300),
+      child: Card(
+        elevation: isSelected ? 8 : 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: isSelected ? BorderSide(color: choice.color, width: 3) : BorderSide.none,
+        ),
+        child: InkWell(
+          onTap: _choiceConfirmed ? null : () => _selectChoice(choice),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(40)),
+                  child: Center(child: Text(choice.emoji, style: const TextStyle(fontSize: 40))),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  choice.displayName,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? choice.color : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Afficher les résultats du round
+  Widget _buildResultsUI() {
+    if (_roundResult == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final isWinner = _currentUserId != null && _roundResult!.isPlayerWinner(_currentUserId!);
+    final isDraw = _roundResult!.isDraw;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (isDraw) ...[
+            Lottie.asset('assets/lottie/draw.json', width: 160, height: 160),
+            const Text("MATCH NUL !", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            const Text("Tous les joueurs ont fait le même choix.", style: TextStyle(fontSize: 18), textAlign: TextAlign.center),
+          ] else if (isWinner) ...[
+            Lottie.asset('assets/lottie/winner.json', width: 160, height: 160),
+            const Text(
+              "VOUS GAGNEZ !",
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.success),
+              textAlign: TextAlign.center,
+            ),
+          ] else ...[
+            Lottie.asset('assets/lottie/lost.json', width: 160, height: 160),
+            const Text(
+              "ÉLIMINÉ !",
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.error),
+              textAlign: TextAlign.center,
+            ),
+          ],
+
+          const SizedBox(height: 32),
+
+          _buildChoicesRecap(),
+
+          const SizedBox(height: 32),
+
+          ElevatedButton.icon(
+            onPressed: _readyForNextRound,
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text("CONTINUER", style: TextStyle(fontSize: 18)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Récapitulatif des choix des joueurs
+  Widget _buildChoicesRecap() {
+    if (_roundResult == null || _roundResult!.playerChoices.isEmpty) {
+      return const SizedBox();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Choix des joueurs", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Divider(),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 200),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _roundResult!.playerChoices.length,
+              separatorBuilder: (context, index) => const Divider(height: 8),
+              itemBuilder: (context, index) {
+                final choice = _roundResult!.playerChoices[index];
+                final player = _activePlayers.firstWhere(
+                  (p) => p.id == choice.playerId,
+                  orElse: () => Player(id: choice.playerId, username: "Joueur inconnu"),
+                );
+
+                final isWinner = _roundResult!.isPlayerWinner(choice.playerId);
+
+                return Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: isWinner ? AppColors.success.withOpacity(0.2) : AppColors.cardDark,
+                      radius: 20,
+                      child: Text(
+                        player.initial,
+                        style: TextStyle(fontWeight: FontWeight.bold, color: isWinner ? AppColors.success : Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        player.username,
+                        style: TextStyle(fontWeight: player.id == _currentUserId ? FontWeight.bold : FontWeight.normal),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: choice.choice.color.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(choice.choice.emoji, style: const TextStyle(fontSize: 18)),
+                          const SizedBox(width: 8),
+                          Text(choice.choice.displayName),
+                        ],
+                      ),
+                    ),
+                    if (isWinner)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8.0),
+                        child: Icon(Icons.emoji_events, color: AppColors.success, size: 20),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -303,14 +471,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Lottie.asset('assets/error.json', width: 200, height: 200),
+              Lottie.asset('assets/lottie/error.json', width: 200, height: 200),
               const Text("Cette partie n'existe plus", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
               ElevatedButton.icon(
                 onPressed: () => context.go(RouteList.home),
                 icon: const Icon(Icons.home),
-                label: const Text("RETOUR À L'ACCUEIL"),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+                label: const Text('RETOUR À L\'ACCUEIL'),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
               ),
             ],
           ),
@@ -318,590 +486,164 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       );
     }
 
-    return WillPopScope(
-      onWillPop: () async {
-        // Empêcher le retour arrière accidentel
-        return false;
-      },
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          title: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [const Icon(Icons.sports_esports, size: 24), const SizedBox(width: 8), Text("Round $_currentRound")],
-          ),
-          backgroundColor: AppColors.primary,
-          centerTitle: true,
-          automaticallyImplyLeading: false,
-          elevation: 0,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.exit_to_app),
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                showDialog(
-                  context: context,
-                  builder:
-                      (context) => AlertDialog(
-                        title: const Text("Quitter la partie ?"),
-                        content: const Text("Voulez-vous vraiment quitter la partie ?"),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler")),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _exitGame();
-                            },
-                            child: Text("Quitter", style: TextStyle(color: AppColors.error)),
-                          ),
-                        ],
-                      ),
-                );
-              },
-            ),
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Pif Paf Pouf", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            Text("Round ${_room!.currentRound}", style: const TextStyle(fontSize: 14, color: Colors.white70)),
           ],
         ),
-        body: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [AppColors.primaryLight.withOpacity(0.3), AppColors.background],
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Phase de compte à rebours
-              if (_countdownActive)
-                Expanded(
-                  child: Center(
-                    child: AnimatedBuilder(
-                      animation: _countdownController,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _pulseAnimation.value,
-                          child: ScaleTransition(
-                            scale: _countdownAnimation,
-                            child: Text(
-                              _countdownTexts[_countdownIndex],
-                              style: TextStyle(
-                                fontSize: 60,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                                letterSpacing: 2,
-                                shadows: [
-                                  Shadow(color: AppColors.primary.withOpacity(0.3), offset: const Offset(0, 4), blurRadius: 8),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-
-              // Phase de jeu
-              if (!_countdownActive && !_showResults)
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        "Faites votre choix !",
-                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+        centerTitle: true,
+        backgroundColor: AppColors.primary,
+        leading: IconButton(
+          icon: const Icon(Icons.exit_to_app, color: Colors.white),
+          onPressed: () {
+            showDialog(
+              context: context,
+              builder:
+                  (context) => AlertDialog(
+                    title: const Text("Quitter la partie ?"),
+                    content: const Text("Voulez-vous vraiment quitter cette partie ?"),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _exitGame();
+                        },
+                        child: Text("QUITTER", style: TextStyle(color: AppColors.error)),
                       ),
-                      const SizedBox(height: 40),
-
-                      SizeTransition(
-                        sizeFactor: _choiceAnimation,
-                        axis: Axis.horizontal,
-                        axisAlignment: 0.0,
-                        child: FadeTransition(
-                          opacity: _choiceAnimation,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildChoiceButton(Choice.pierre),
-                              _buildChoiceButton(Choice.papier),
-                              _buildChoiceButton(Choice.ciseaux),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      if (_selectedChoice != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 30),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOut,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: _selectedChoice!.color.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: _selectedChoice!.color, width: 2),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(_selectedChoice!.emoji, style: const TextStyle(fontSize: 28)),
-                                const SizedBox(width: 10),
-                                Text(
-                                  "Vous avez choisi: ${_selectedChoice!.displayName}",
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 40),
-
-                      // Liste des joueurs participants
-                      const Text("Joueurs:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-
-                      // Afficher les avatars des joueurs
-                      _buildPlayerStatusList(),
                     ],
                   ),
-                ),
-
-              // Phase de résultats
-              if (_showResults)
-                Expanded(
-                  child: Center(
-                    child: ScaleTransition(
-                      scale: _resultsAnimation,
-                      child: _room!.winner != null ? _buildFinalWinnerView() : _buildRoundResultView(),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+            );
+          },
         ),
+        actions: [
+          // Indicateur de joueurs actifs
+          Container(
+            margin: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+            child: Row(
+              children: [
+                const Icon(Icons.people, size: 16, color: Colors.white),
+                const SizedBox(width: 4),
+                Text(
+                  "${_room!.survivors?.length ?? _activePlayers.length}",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-    );
-  }
+      body: SafeArea(
+        child: StreamBuilder<Room>(
+          stream: _firebaseService.roomStream(widget.roomId),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting && _room == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-  Widget _buildPlayerStatusList() {
-    return StreamBuilder<List<GameChoice>>(
-      stream: _firebaseService.roundChoicesStream(widget.roomId, _currentRound),
-      builder: (context, snapshot) {
-        final choices = snapshot.data ?? [];
-
-        return Container(
-          height: 90,
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _players.length,
-            shrinkWrap: true,
-            itemBuilder: (context, index) {
-              final player = _players[index];
-              final hasChosen = choices.any((choice) => choice.playerId == player.id);
-              final isCurrentUser = player.id == _currentUserId;
-
-              return Container(
-                width: 70,
-                margin: const EdgeInsets.symmetric(horizontal: 5),
+            if (snapshot.hasError) {
+              return Center(
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: hasChosen ? AppColors.success : AppColors.textMuted,
-                            boxShadow: [
-                              BoxShadow(
-                                color: (hasChosen ? AppColors.success : AppColors.textMuted).withOpacity(0.4),
-                                blurRadius: 8,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(2),
-                          child: CircleAvatar(
-                            backgroundColor: isCurrentUser ? AppColors.primary : Colors.white,
-                            radius: 25,
-                            child: Text(
-                              player.initial,
-                              style: TextStyle(
-                                color: isCurrentUser ? Colors.white : AppColors.onBackground,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (hasChosen)
-                          Container(
-                            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
-                            child: const Icon(Icons.check_circle, color: AppColors.success, size: 18),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      player.username,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                        color: isCurrentUser ? AppColors.primary : AppColors.onBackground,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                    Text(
-                      hasChosen ? "Prêt" : "En attente...",
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: hasChosen ? AppColors.success : AppColors.textMuted,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    Icon(Icons.error_outline, size: 60, color: AppColors.error),
+                    const SizedBox(height: 16),
+                    Text("Erreur: ${snapshot.error}", style: TextStyle(color: AppColors.error), textAlign: TextAlign.center),
+                    const SizedBox(height: 24),
+                    ElevatedButton(onPressed: _exitGame, child: const Text("QUITTER LA PARTIE")),
                   ],
                 ),
               );
-            },
-          ),
-        );
-      },
-    );
-  }
+            }
 
-  Widget _buildFinalWinnerView() {
-    final winnerPlayer = _players.firstWhere(
-      (player) => player.id == _room!.winner,
-      orElse: () => Player(id: 'unknown', username: 'Inconnu'),
-    );
+            if (snapshot.hasData) {
+              _room = snapshot.data;
+              _activePlayers = _room!.players.where((p) => p.isActive).toList();
 
-    final isCurrentUserWinner = _room!.winner == _currentUserId;
+              // Vérifier si la partie est terminée
+              if (_room!.winner != null) {
+                final isWinner = _room!.winner == _currentUserId;
+                return _buildGameOverScreen(isWinner);
+              }
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      margin: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(color: AppColors.primary.withOpacity(0.2), spreadRadius: 5, blurRadius: 10, offset: const Offset(0, 3)),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (isCurrentUserWinner)
-            Lottie.asset('assets/winner.json', width: 150, height: 150, repeat: true, animate: true)
-          else
-            Lottie.asset('assets/trophy.json', width: 120, height: 120, repeat: true, animate: true),
+              return StreamBuilder<RoundResult?>(
+                stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
+                builder: (context, resultSnapshot) {
+                  if (resultSnapshot.hasData && resultSnapshot.data!.completed) {
+                    _roundResult = resultSnapshot.data;
+                    // Ne pas montrer les résultats s'ils ont déjà été vus et que le joueur est prêt pour le prochain round
+                    if (_showResults == false && _currentPlayer?.isReady == true) {
+                      return _buildChoiceUI();
+                    } else {
+                      // Autrement, montrer les résultats
+                      _showResults = true;
+                      return _buildResultsUI();
+                    }
+                  }
 
-          const SizedBox(height: 20),
+                  // Si pas de résultats, montrer l'interface de choix
+                  return _buildChoiceUI();
+                },
+              );
+            }
 
-          Text(
-            "VICTOIRE !",
-            style: TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-              color: AppColors.secondary,
-              letterSpacing: 1.5,
-              shadows: [Shadow(color: AppColors.secondary.withOpacity(0.3), offset: const Offset(0, 2), blurRadius: 3)],
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(20)),
-            child: Text(
-              winnerPlayer.username,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          Text(
-            isCurrentUserWinner
-                ? "Félicitations, vous avez gagné la partie !"
-                : "La partie est terminée. ${winnerPlayer.username} est le vainqueur !",
-            style: TextStyle(
-              fontSize: 18,
-              color: isCurrentUserWinner ? AppColors.success : AppColors.onBackground,
-              fontWeight: FontWeight.w500,
-            ),
-            textAlign: TextAlign.center,
-          ),
-
-          const SizedBox(height: 30),
-
-          ElevatedButton.icon(
-            onPressed: _exitGame,
-            icon: const Icon(Icons.home),
-            label: const Text("RETOUR À L'ACCUEIL"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRoundResultView() {
-    if (_roundResult == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final isCurrentUserWinner = _roundResult!.isPlayerWinner(_currentUserId!);
-    final isDraw = _roundResult!.isDraw;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      margin: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.timer, size: 24, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Text(
-                "Résultats du Round $_currentRound",
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 30),
-
-          // Afficher tous les choix
-          Container(
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(color: AppColors.cardDark, borderRadius: BorderRadius.circular(16)),
-            child: Column(
-              children: [
-                const Text("Choix des joueurs", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Divider(height: 20),
-                ..._roundResult!.playerChoices.map((choiceData) {
-                  final player = _players.firstWhere(
-                    (p) => p.id == choiceData.playerId,
-                    orElse: () => Player(id: choiceData.playerId, username: 'Inconnu'),
-                  );
-
-                  final isWinner = _roundResult!.isPlayerWinner(choiceData.playerId);
-                  final isCurrentUser = choiceData.playerId == _currentUserId;
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: isCurrentUser ? AppColors.primaryLight : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isWinner ? AppColors.success : AppColors.cardDark, width: 1.5),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            if (isWinner) const Icon(Icons.check_circle, color: AppColors.success, size: 16),
-                            const SizedBox(width: 5),
-                            Text(
-                              player.username,
-                              style: TextStyle(
-                                fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                                color: isCurrentUser ? AppColors.primary : AppColors.onBackground,
-                              ),
-                            ),
-                            if (isCurrentUser) const Text(" (vous)", style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: choiceData.choice.color.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(choiceData.choice.emoji, style: const TextStyle(fontSize: 20)),
-                              const SizedBox(width: 5),
-                              Text(
-                                choiceData.choice.displayName,
-                                style: TextStyle(fontWeight: FontWeight.w500, color: choiceData.choice.color),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 30),
-
-          // Résultat
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-            decoration: BoxDecoration(
-              color:
-                  isDraw
-                      ? AppColors.warning.withOpacity(0.2)
-                      : isCurrentUserWinner
-                      ? AppColors.success.withOpacity(0.2)
-                      : AppColors.error.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color:
-                    isDraw
-                        ? AppColors.warning
-                        : isCurrentUserWinner
-                        ? AppColors.success
-                        : AppColors.error,
-                width: 2,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isDraw
-                      ? Icons.balance
-                      : isCurrentUserWinner
-                      ? Icons.check_circle
-                      : Icons.cancel,
-                  color:
-                      isDraw
-                          ? AppColors.warning
-                          : isCurrentUserWinner
-                          ? AppColors.success
-                          : AppColors.error,
-                  size: 24,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  isDraw
-                      ? "Égalité parfaite ! Personne n'est éliminé."
-                      : isCurrentUserWinner
-                      ? "Vous survivez à ce round !"
-                      : "Vous êtes éliminé !",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color:
-                        isDraw
-                            ? AppColors.warning
-                            : isCurrentUserWinner
-                            ? AppColors.success
-                            : AppColors.error,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 30),
-
-          if (isCurrentUserWinner || isDraw)
-            ElevatedButton.icon(
-              onPressed: _readyForNextRound,
-              icon: const Icon(Icons.play_arrow),
-              label: const Text("PRÊT POUR LE PROCHAIN ROUND"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-            )
-          else
-            ElevatedButton.icon(
-              onPressed: _exitGame,
-              icon: const Icon(Icons.exit_to_app),
-              label: const Text("QUITTER LA PARTIE"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // --- Helper methods ---
-
-  Widget _buildChoiceButton(Choice choice) {
-    final bool isSelected = _selectedChoice == choice;
-
-    return GestureDetector(
-      onTap: _choiceLocked ? null : () => _makeChoice(choice),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: 100,
-        height: 120,
-        decoration: BoxDecoration(
-          color: isSelected ? choice.color.withOpacity(0.9) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: isSelected ? choice.color.withOpacity(0.6) : Colors.black.withOpacity(0.1),
-              blurRadius: isSelected ? 15 : 8,
-              offset: Offset(0, isSelected ? 6 : 4),
-              spreadRadius: isSelected ? 1 : 0,
-            ),
-          ],
-          border: Border.all(color: isSelected ? choice.color : Colors.grey.shade300, width: isSelected ? 3 : 1),
+            return const Center(child: CircularProgressIndicator());
+          },
         ),
+      ),
+    );
+  }
+
+  // Écran de fin de partie
+  Widget _buildGameOverScreen(bool isWinner) {
+    // Trouver le gagnant
+    final winner = _room!.players.firstWhere(
+      (p) => p.id == _room!.winner,
+      orElse: () => Player(id: _room!.winner ?? '', username: "Joueur inconnu"),
+    );
+
+    return Scaffold(
+      backgroundColor: isWinner ? AppColors.success.withOpacity(0.2) : AppColors.background,
+      body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Émoji vibrant et animé
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              transform: isSelected ? (Matrix4.identity()..scale(1.2)) : Matrix4.identity(),
-              transformAlignment: Alignment.center,
-              child: Text(choice.emoji, style: const TextStyle(fontSize: 40)),
-            ),
-            const SizedBox(height: 10),
-            // Nom du choix
-            Text(
-              choice.displayName,
-              style: TextStyle(color: isSelected ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            // Indication visuelle de sélection
-            if (isSelected)
-              Container(
-                margin: const EdgeInsets.only(top: 5),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(2)),
+            if (isWinner) ...[
+              Lottie.asset('assets/lottie/trophy.json', width: 200, height: 200),
+              const Text(
+                "FÉLICITATIONS !",
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.success),
               ),
+              const SizedBox(height: 16),
+              const Text("Vous avez remporté la victoire !", style: TextStyle(fontSize: 22)),
+            ] else ...[
+              Lottie.asset('assets/lottie/game_over.json', width: 200, height: 200),
+              Text(
+                "${winner.username} a gagné !",
+                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            ],
+
+            const SizedBox(height: 40),
+
+            ElevatedButton.icon(
+              onPressed: _exitGame,
+              icon: const Icon(Icons.exit_to_app),
+              label: const Text("RETOUR À L'ACCUEIL", style: TextStyle(fontSize: 18)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              ),
+            ),
           ],
         ),
       ),

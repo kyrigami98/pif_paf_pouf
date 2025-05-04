@@ -249,6 +249,14 @@ class FirebaseService {
           'currentRound': 1,
           'roundStartTime': FieldValue.serverTimestamp(),
         });
+
+        // Créer le premier round
+        await _firestore.collection('rooms').doc(roomId).collection('rounds').doc('round1').set({
+          'completed': false,
+          'winners': [],
+          'roundNumber': 1,
+          'startedAt': FieldValue.serverTimestamp(),
+        });
       }
 
       return true;
@@ -286,14 +294,20 @@ class FirebaseService {
   Future<bool> makeChoice(String roomId, String playerId, String choiceStr) async {
     try {
       final roomDoc = await _firestore.collection('rooms').doc(roomId).get();
+      if (!roomDoc.exists) {
+        debugPrint('Room introuvable');
+        return false;
+      }
+
       final currentRound = roomDoc.data()?['currentRound'] ?? 1;
 
       // Convertir la chaîne en énumération Choice
       final choice = Choice.fromString(choiceStr);
 
       // Créer l'objet GameChoice
-      final gameChoice = GameChoice(playerId: playerId, choice: choice);
+      final gameChoice = GameChoice(playerId: playerId, choice: choice, timestamp: DateTime.now());
 
+      // Mettre à jour le choix du joueur dans la collection de rounds
       await _firestore
           .collection('rooms')
           .doc(roomId)
@@ -302,6 +316,16 @@ class FirebaseService {
           .collection('choices')
           .doc(playerId)
           .set(gameChoice.toFirestore());
+
+      // Mettre à jour le statut du joueur également
+      await _firestore.collection('rooms').doc(roomId).collection('players').doc(playerId).update({'currentChoice': choiceStr});
+
+      // Vérifier si tous les joueurs ont fait leur choix
+      bool allMadeChoice = await checkAllChoicesMade(roomId);
+      if (allMadeChoice) {
+        // Déterminer le gagnant si tous les joueurs ont choisi
+        await determineWinner(roomId);
+      }
 
       return true;
     } catch (e) {
@@ -344,14 +368,38 @@ class FirebaseService {
   // Vérifier si tous les joueurs ont fait leur choix
   Future<bool> checkAllChoicesMade(String roomId) async {
     try {
-      final room = await getRoom(roomId);
-      if (room == null) return false;
+      final roomDoc = await _firestore.collection('rooms').doc(roomId).get();
+      if (!roomDoc.exists) return false;
 
-      final currentRound = room.currentRound;
-      final playerCount = room.playerCount;
+      final currentRound = roomDoc.data()?['currentRound'] ?? 1;
 
-      final choices = await getRoundChoices(roomId, currentRound);
-      return choices.length == playerCount;
+      // Récupérer les joueurs actifs (ou survivants si c'est après le premier round)
+      final List<String> survivorIds =
+          roomDoc.data()?['survivors'] != null ? List<String>.from(roomDoc.data()?['survivors']) : [];
+
+      // Obtenir tous les joueurs actifs
+      final playersSnapshot = await _firestore.collection('rooms').doc(roomId).collection('players').get();
+      final List<Player> activePlayers =
+          playersSnapshot.docs.map((doc) => Player.fromFirestore(doc)).where((player) => player.isActive).toList();
+
+      // Si nous avons des survivants, ne vérifier que leurs choix
+      final List<Player> relevantPlayers =
+          survivorIds.isNotEmpty ? activePlayers.where((player) => survivorIds.contains(player.id)).toList() : activePlayers;
+
+      // Récupérer les choix pour ce round
+      final choicesSnapshot =
+          await _firestore
+              .collection('rooms')
+              .doc(roomId)
+              .collection('rounds')
+              .doc('round$currentRound')
+              .collection('choices')
+              .get();
+
+      final choices = choicesSnapshot.docs.map((doc) => GameChoice.fromFirestore(doc)).toList();
+
+      // Vérifier si tous les joueurs concernés ont fait leur choix
+      return choices.length == relevantPlayers.length;
     } catch (e) {
       debugPrint('Erreur lors de la vérification des choix: $e');
       return false;
@@ -368,23 +416,43 @@ class FirebaseService {
 
       // Récupérer tous les choix
       final choices = await getRoundChoices(roomId, currentRound);
+      if (choices.isEmpty) {
+        debugPrint('Aucun choix trouvé pour le round $currentRound');
+        return;
+      }
 
       // Extraire les choix pour la logique de jeu
       final playerChoices = Map<String, Choice>.fromEntries(choices.map((choice) => MapEntry(choice.playerId, choice.choice)));
 
+      // Prendre en compte seulement les survivants des rounds précédents s'il y en a
+      final List<String> previousSurvivors = room.survivors ?? [];
+
+      // Si nous avons des survivants des rounds précédents, filtrer les choix
+      Map<String, Choice> relevantChoices =
+          previousSurvivors.isNotEmpty
+              ? Map.fromEntries(playerChoices.entries.where((entry) => previousSurvivors.contains(entry.key)))
+              : playerChoices;
+
       // Déterminer les gagnants
-      final survivorIds = calculateSurvivors(playerChoices);
+      final survivorIds = calculateSurvivors(relevantChoices);
+
+      debugPrint('Survivants déterminés: $survivorIds');
 
       // Créer un objet RoundResult
       final result = RoundResult(
         roundNumber: currentRound,
         winners: survivorIds.toList(),
         completed: true,
+        completedAt: DateTime.now(),
         playerChoices: choices,
       );
 
-      // Enregistrer les résultats
-      await _firestore.collection('rooms').doc(roomId).collection('rounds').doc('round$currentRound').set(result.toFirestore());
+      // Enregistrer les résultats du round
+      await _firestore.collection('rooms').doc(roomId).collection('rounds').doc('round$currentRound').update({
+        'winners': result.winners,
+        'completed': true,
+        'completedAt': FieldValue.serverTimestamp(),
+      });
 
       // Si un seul gagnant, fin de la partie
       if (survivorIds.length == 1) {
@@ -398,6 +466,15 @@ class FirebaseService {
         await _firestore.collection('rooms').doc(roomId).update({
           'currentRound': currentRound + 1,
           'roundStartTime': FieldValue.serverTimestamp(),
+          'survivors': previousSurvivors.isNotEmpty ? previousSurvivors : room.players.map((p) => p.id).toList(),
+        });
+
+        // Créer le document pour le prochain round
+        await _firestore.collection('rooms').doc(roomId).collection('rounds').doc('round${currentRound + 1}').set({
+          'completed': false,
+          'winners': [],
+          'roundNumber': currentRound + 1,
+          'startedAt': FieldValue.serverTimestamp(),
         });
       } else {
         // Préparation du round suivant
@@ -406,6 +483,20 @@ class FirebaseService {
           'roundStartTime': FieldValue.serverTimestamp(),
           'survivors': survivorIds.toList(),
         });
+
+        // Créer le document pour le prochain round
+        await _firestore.collection('rooms').doc(roomId).collection('rounds').doc('round${currentRound + 1}').set({
+          'completed': false,
+          'winners': [],
+          'roundNumber': currentRound + 1,
+          'startedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Réinitialiser les choix des joueurs
+      final playersSnapshot = await _firestore.collection('rooms').doc(roomId).collection('players').get();
+      for (var doc in playersSnapshot.docs) {
+        await doc.reference.update({'currentChoice': null, 'isReady': false});
       }
     } catch (e) {
       debugPrint('Erreur lors de la détermination du gagnant: $e');
@@ -445,13 +536,11 @@ class FirebaseService {
 
     // Retourner les joueurs qui ont fait le choix gagnant
     Set<String> survivors = {};
-    if (winningChoice != null) {
-      playerChoices.forEach((playerId, choice) {
-        if (choice == winningChoice) {
-          survivors.add(playerId);
-        }
-      });
-    }
+    playerChoices.forEach((playerId, choice) {
+      if (choice == winningChoice) {
+        survivors.add(playerId);
+      }
+    });
 
     return survivors;
   }

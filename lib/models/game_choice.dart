@@ -8,6 +8,8 @@ enum Choice {
     emoji: '🪨',
     color: AppColors.rock, // Utilisation de la couleur thématique
     beats: ['ciseaux'],
+    imagePath: 'assets/images/rock.png',
+    svgPath: 'assets/svg/rock.svg',
   ),
 
   papier(
@@ -15,6 +17,8 @@ enum Choice {
     emoji: '📄',
     color: AppColors.paper, // Utilisation de la couleur thématique
     beats: ['pierre'],
+    imagePath: 'assets/images/paper.png',
+    svgPath: 'assets/svg/paper.svg',
   ),
 
   ciseaux(
@@ -22,14 +26,25 @@ enum Choice {
     emoji: '✂️',
     color: AppColors.scissors, // Utilisation de la couleur thématique
     beats: ['papier'],
+    imagePath: 'assets/images/scissors.png',
+    svgPath: 'assets/svg/scissors.svg',
   );
 
   final String displayName;
   final String emoji;
   final Color color;
   final List<String> beats;
+  final String imagePath;
+  final String svgPath;
 
-  const Choice({required this.displayName, required this.emoji, required this.color, required this.beats});
+  const Choice({
+    required this.displayName,
+    required this.emoji,
+    required this.color,
+    required this.beats,
+    required this.imagePath,
+    required this.svgPath,
+  });
 
   // Vérifie si ce choix bat un autre choix
   bool canBeat(Choice other) {

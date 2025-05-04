@@ -6,8 +6,9 @@ import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/services/firebase_service.dart';
 import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:lottie/lottie.dart';
+import 'dart:async';
 import 'dart:math';
-import 'package:gap/gap.dart';
 
 class LobbyScreen extends StatefulWidget {
   final String roomId;
@@ -18,7 +19,7 @@ class LobbyScreen extends StatefulWidget {
   State<LobbyScreen> createState() => _LobbyScreenState();
 }
 
-class _LobbyScreenState extends State<LobbyScreen> {
+class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
   String? _currentUserId;
   bool _isReady = false;
@@ -29,19 +30,47 @@ class _LobbyScreenState extends State<LobbyScreen> {
   bool _gameStarting = false;
   bool _shouldCheckReadyStatus = false;
 
+  // Animations
+  late AnimationController _codeAnimController;
+  late Animation<double> _codeAnimation;
+  late AnimationController _buttonAnimController;
+  late Animation<double> _buttonAnimation;
+  late AnimationController _playerAnimController;
+  Timer? _confettiTimer;
+
   @override
   void initState() {
     super.initState();
     _initialize();
+
+    // Code de salle animation
+    _codeAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    _codeAnimation = CurvedAnimation(parent: _codeAnimController, curve: Curves.easeOutBack);
+    _codeAnimController.forward();
+
+    // Bouton animation
+    _buttonAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+      reverseDuration: const Duration(milliseconds: 1000),
+    );
+    _buttonAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 1.05), weight: 1),
+      TweenSequenceItem(tween: Tween<double>(begin: 1.05, end: 1.0), weight: 1),
+    ]).animate(_buttonAnimController);
+    _buttonAnimController.repeat(reverse: true);
+
+    // Animation des joueurs
+    _playerAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_shouldCheckReadyStatus) {
-      _shouldCheckReadyStatus = false;
-      Future.microtask(() => _checkAllPlayersReady(_players));
-    }
+  void dispose() {
+    _codeAnimController.dispose();
+    _buttonAnimController.dispose();
+    _playerAnimController.dispose();
+    _confettiTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _initialize() async {
@@ -63,6 +92,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_shouldCheckReadyStatus) {
+      _shouldCheckReadyStatus = false;
+      Future.microtask(() => _checkAllPlayersReady(_players));
+    }
+  }
+
   Future<void> _toggleReadyStatus() async {
     if (_currentUserId == null) return;
 
@@ -72,6 +110,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
     setState(() {
       _isReady = newStatus;
     });
+
+    // Feedback tactile et visuel
+    HapticFeedback.mediumImpact();
   }
 
   Future<void> _leaveRoom() async {
@@ -80,6 +121,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     try {
       await _firebaseService.removePlayerFromRoom(widget.roomId, _currentUserId!);
       if (mounted) {
+        HapticFeedback.mediumImpact();
         context.go(RouteList.home);
       }
     } catch (e) {
@@ -89,7 +131,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   void _copyRoomCode() {
     Clipboard.setData(ClipboardData(text: _roomCode)).then((_) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Code copié dans le presse-papier")));
+      HapticFeedback.selectionClick();
+      _showInfoMessage("Code copié dans le presse-papier");
     });
   }
 
@@ -99,14 +142,18 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final allReady = players.every((player) => player['isReady'] == true);
     final hasEnoughPlayers = players.length >= 2;
 
-    if ((allReady && hasEnoughPlayers) != _allPlayersReady || _gameStarting != (allReady && hasEnoughPlayers && !_gameStarting)) {
+    final shouldStartGame = allReady && hasEnoughPlayers && !_gameStarting;
+
+    if (shouldStartGame || allReady != _allPlayersReady) {
       setState(() {
         _allPlayersReady = allReady && hasEnoughPlayers;
 
-        if (_allPlayersReady && !_gameStarting) {
+        if (shouldStartGame) {
           _gameStarting = true;
 
-          _showInfoMessage("Tous les joueurs sont prêts! Le jeu va commencer...");
+          // Feedback et animation
+          HapticFeedback.heavyImpact();
+          _showCountdown();
 
           Future.delayed(const Duration(seconds: 3), () {
             if (mounted) {
@@ -118,12 +165,60 @@ class _LobbyScreenState extends State<LobbyScreen> {
     }
   }
 
+  void _showCountdown() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.primary.withOpacity(0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.all(24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "TOUS LES JOUEURS SONT PRÊTS!",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              const SizedBox(height: 20),
+              Lottie.asset('assets/lottie/countdown.json', width: 120, height: 120, repeat: true),
+              const SizedBox(height: 10),
+              const Text("La partie commence...", style: TextStyle(color: Colors.white, fontSize: 16)),
+            ],
+          ),
+        );
+      },
+    );
+
+    // Activer les confettis
+    _confettiTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      HapticFeedback.lightImpact();
+    });
+  }
+
   void _showErrorMessage(String message) {
-    alertKey.currentState?.showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+    HapticFeedback.vibrate();
+    alertKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   void _showInfoMessage(String message) {
-    alertKey.currentState?.showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.primary));
+    alertKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
@@ -136,10 +231,42 @@ class _LobbyScreenState extends State<LobbyScreen> {
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text("Lobby", style: TextStyle(color: AppColors.onPrimary, fontFamily: 'Chewy')),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.group, color: AppColors.onPrimary),
+              const SizedBox(width: 8),
+              const Text("Salle d'attente", style: TextStyle(color: AppColors.onPrimary)),
+            ],
+          ),
+          elevation: 0,
           backgroundColor: AppColors.primary,
           centerTitle: true,
-          leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.onPrimary), onPressed: _leaveRoom),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.onPrimary),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              showDialog(
+                context: context,
+                builder:
+                    (context) => AlertDialog(
+                      title: const Text("Quitter la salle ?"),
+                      content: const Text("Voulez-vous vraiment quitter cette salle d'attente ?"),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler")),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _leaveRoom();
+                          },
+                          child: Text("Quitter", style: TextStyle(color: AppColors.error)),
+                        ),
+                      ],
+                    ),
+              );
+            },
+          ),
         ),
         body: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('rooms').doc(widget.roomId).snapshots(),
@@ -153,9 +280,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text("Cette room n'existe plus", style: TextStyle(fontSize: 18)),
-                    const Gap(20),
-                    ElevatedButton(onPressed: () => context.go(RouteList.home), child: const Text("Retour à l'accueil")),
+                    Lottie.asset('assets/lottie/error.json', width: 150, height: 150),
+                    const Text("Cette salle n'existe plus", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: () => context.go(RouteList.home),
+                      icon: const Icon(Icons.home),
+                      label: const Text("RETOUR À L'ACCUEIL"),
+                      style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
+                    ),
                   ],
                 ),
               );
@@ -180,7 +313,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text("Aucun joueur dans cette room"));
+                  return const Center(child: Text("Aucun joueur dans cette salle"));
                 }
 
                 final players =
@@ -206,84 +339,181 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 if (_players.toString() != players.toString()) {
                   _players = players;
                   _shouldCheckReadyStatus = true;
+                  _playerAnimController.reset();
+                  _playerAnimController.forward();
                 }
 
-                return Column(
-                  children: [
-                    if (_roomCode.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Card(
-                          color: AppColors.primaryLight,
-                          elevation: 4,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Column(
-                                  children: [
-                                    const Text(
-                                      "CODE DE LA PARTIE",
-                                      style: TextStyle(fontSize: 14, color: AppColors.primaryDark, fontWeight: FontWeight.bold),
+                return SafeArea(
+                  child: Column(
+                    children: [
+                      // Code de salle animé
+                      ScaleTransition(
+                        scale: _codeAnimation,
+                        child: Container(
+                          width: MediaQuery.of(context).size.width * 0.9,
+                          margin: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5)),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "CODE DE LA PARTIE",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white70,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1,
                                     ),
-                                    Text(
-                                      _roomCode,
-                                      style: const TextStyle(
-                                        fontSize: 28,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 4,
-                                        color: AppColors.primary,
-                                        fontFamily: 'Chewy',
-                                      ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _roomCode,
+                                    style: const TextStyle(
+                                      fontSize: 32,
+                                      letterSpacing: 5,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                              InkWell(
+                                onTap: _copyRoomCode,
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(Icons.copy_rounded, color: Colors.white, size: 28),
                                 ),
-                                IconButton(icon: const Icon(Icons.copy, color: AppColors.primary), onPressed: _copyRoomCode),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Statut et joueurs
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        decoration: BoxDecoration(color: AppColors.cardDark, borderRadius: BorderRadius.circular(12)),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.people, color: AppColors.primary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "${players.length}/6 joueurs",
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                ),
                               ],
                             ),
-                          ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _allPlayersReady ? AppColors.success.withOpacity(0.2) : AppColors.warning.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _allPlayersReady ? Icons.check_circle : Icons.hourglass_empty,
+                                    size: 16,
+                                    color: _allPlayersReady ? AppColors.success : AppColors.warning,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _allPlayersReady ? "Tous prêts !" : "En attente...",
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: _allPlayersReady ? AppColors.success : AppColors.warning,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
 
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text("${players.length}/6 joueurs", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          Text(
-                            _allPlayersReady ? "Tous prêts !" : "En attente...",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: _allPlayersReady ? Colors.green : Colors.orange,
+                      // Liste des joueurs
+                      Expanded(child: FadeTransition(opacity: _playerAnimController, child: _buildPlayersList(players))),
+
+                      // Bouton prêt avec animation
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+                        child: ScaleTransition(
+                          scale: _isReady ? const AlwaysStoppedAnimation(1.0) : _buttonAnimation,
+                          child: Container(
+                            width: double.infinity,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors:
+                                    _isReady
+                                        ? [AppColors.success, AppColors.success.withGreen(180)]
+                                        : [AppColors.primary, AppColors.primaryDark],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (_isReady ? AppColors.success : AppColors.primary).withOpacity(0.4),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: _gameStarting ? null : _toggleReadyStatus,
+                                borderRadius: BorderRadius.circular(16),
+                                child: Center(
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(_isReady ? Icons.check_circle : Icons.play_circle_fill, color: Colors.white, size: 28),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        _isReady ? "PRÊT !" : "JE SUIS PRÊT",
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                          letterSpacing: 1.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-
-                    Expanded(child: players.length >= 6 ? _buildPlayersGrid(players) : _buildPlayersRadar(players)),
-
-                    Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: ElevatedButton(
-                        onPressed: _gameStarting ? null : _toggleReadyStatus,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isReady ? Colors.green : AppColors.primary,
-                          foregroundColor: AppColors.onPrimary,
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                          disabledBackgroundColor: Colors.green.withOpacity(0.5),
-                          minimumSize: const Size.fromHeight(60),
-                        ),
-                        child: Text(
-                          _isReady ? "PRÊT !" : "JE SUIS PRÊT",
-                          style: const TextStyle(fontSize: 18, fontFamily: 'Chewy'),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 );
               },
             );
@@ -293,135 +523,114 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
-  Widget _buildPlayersGrid(List<Map<String, dynamic>> players) {
-    return GridView.builder(
-      padding: const EdgeInsets.all(16.0),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 1.2,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-      ),
-      itemCount: players.length,
-      itemBuilder: (context, index) {
-        final player = players[index];
-        return _buildPlayerAvatar(player);
-      },
-    );
-  }
-
-  Widget _buildPlayersRadar(List<Map<String, dynamic>> players) {
-    return Center(
-      child: SizedBox(
-        width: 300,
-        height: 300,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.primary.withOpacity(0.3), width: 2),
-              ),
-            ),
-            Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.primary.withOpacity(0.2), width: 1.5),
-              ),
-            ),
-            ..._positionPlayersInCircle(players),
-            Container(
-              width: 80,
-              height: 80,
-              decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryLight),
-              child: Center(
-                child: Text(
-                  "${players.length}/6",
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _positionPlayersInCircle(List<Map<String, dynamic>> players) {
-    const radius = 120.0;
-    final center = const Offset(150, 150);
-    final widgets = <Widget>[];
-
-    for (int i = 0; i < players.length; i++) {
-      final player = players[i];
-      final angle = 2 * pi * i / max(1, players.length);
-      final x = center.dx + radius * cos(angle);
-      final y = center.dy + radius * sin(angle);
-
-      widgets.add(Positioned(left: x - 40, top: y - 40, child: _buildPlayerAvatar(player)));
-    }
-
-    return widgets;
-  }
-
-  Widget _buildPlayerAvatar(Map<String, dynamic> player) {
-    final isCurrentUser = player['id'] == _currentUserId;
-
+  Widget _buildPlayersList(List<Map<String, dynamic>> players) {
     return Container(
-      width: 80,
-      height: 100,
-      decoration: BoxDecoration(
-        color: isCurrentUser ? AppColors.primaryLight : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5, offset: const Offset(0, 2))],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: player['isReady'] ? Colors.green : AppColors.primary,
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 3, offset: const Offset(0, 1))],
-            ),
-            child: Center(
-              child: Text(
-                player['username'].substring(0, 1).toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+      margin: const EdgeInsets.all(16),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          padding: EdgeInsets.zero,
+          itemCount: players.length,
+          separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.transparent),
+          itemBuilder: (context, index) {
+            final player = players[index];
+            final isCurrentUser = player['id'] == _currentUserId;
+
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              decoration: BoxDecoration(
+                color: isCurrentUser ? AppColors.primaryLight : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2))],
               ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            player['username'],
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-              color: isCurrentUser ? AppColors.primary : Colors.black,
-            ),
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-          if (player['isHost'])
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              margin: const EdgeInsets.only(top: 2),
-              decoration: BoxDecoration(color: AppColors.primaryDark, borderRadius: BorderRadius.circular(10)),
-              child: const Text("HÔTE", style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          Text(
-            player['isReady'] ? "Prêt" : "En attente",
-            style: TextStyle(fontSize: 10, color: player['isReady'] ? Colors.green : Colors.orange, fontWeight: FontWeight.bold),
-          ),
-        ],
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              child: ListTile(
+                leading: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: player['isReady'] ? AppColors.success : AppColors.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (player['isReady'] ? AppColors.success : AppColors.primary).withOpacity(0.3),
+                            blurRadius: 6,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          player['username'].substring(0, 1).toUpperCase(),
+                          style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    if (player['isReady'])
+                      Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        child: const Icon(Icons.check_circle, color: AppColors.success, size: 16),
+                      ),
+                  ],
+                ),
+                title: Row(
+                  children: [
+                    Text(
+                      player['username'],
+                      style: TextStyle(
+                        fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
+                        fontSize: 16,
+                        color: isCurrentUser ? AppColors.primary : AppColors.onBackground,
+                      ),
+                    ),
+                    if (isCurrentUser)
+                      Container(
+                        margin: const EdgeInsets.only(left: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          "VOUS",
+                          style: TextStyle(fontSize: 9, color: AppColors.primary, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+                subtitle: Text(
+                  player['isReady'] ? "Prêt à jouer" : "En attente...",
+                  style: TextStyle(fontSize: 12, color: player['isReady'] ? AppColors.success : AppColors.textMuted),
+                ),
+                trailing:
+                    player['isHost']
+                        ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.secondary.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.stars, size: 14, color: AppColors.secondary),
+                              SizedBox(width: 4),
+                              Text(
+                                "HÔTE",
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.secondary),
+                              ),
+                            ],
+                          ),
+                        )
+                        : null,
+              ),
+            );
+          },
+        ),
       ),
     );
   }

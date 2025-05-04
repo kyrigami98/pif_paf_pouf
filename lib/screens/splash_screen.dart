@@ -108,7 +108,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 padding: const EdgeInsets.only(bottom: 32.0),
                 child: Column(
                   children: [
-                    Lottie.asset('assets/loading.json', width: 80, height: 80, fit: BoxFit.cover),
+                    Lottie.asset('assets/lottie/loading.json', width: 80, height: 80, fit: BoxFit.cover),
                     const SizedBox(height: 16),
                     const Text(
                       'Préparation du jeu...',
