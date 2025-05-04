@@ -27,11 +27,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
   String _roomCode = "";
   bool _isHost = false;
   bool _gameStarting = false;
+  bool _shouldCheckReadyStatus = false;
 
   @override
   void initState() {
     super.initState();
     _initialize();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_shouldCheckReadyStatus) {
+      _shouldCheckReadyStatus = false;
+      Future.microtask(() => _checkAllPlayersReady(_players));
+    }
   }
 
   Future<void> _initialize() async {
@@ -41,10 +51,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
         _currentUserId = userId;
       });
 
-      // Mettre à jour le statut du joueur quand il rejoint le lobby
       await _firebaseService.updatePlayerStatus(widget.roomId, userId, false);
 
-      // Charger le code de la room
       final roomDoc = await FirebaseFirestore.instance.collection('rooms').doc(widget.roomId).get();
 
       if (roomDoc.exists && mounted) {
@@ -91,25 +99,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final allReady = players.every((player) => player['isReady'] == true);
     final hasEnoughPlayers = players.length >= 2;
 
-    if (allReady && hasEnoughPlayers && !_gameStarting) {
+    if ((allReady && hasEnoughPlayers) != _allPlayersReady || _gameStarting != (allReady && hasEnoughPlayers && !_gameStarting)) {
       setState(() {
-        _allPlayersReady = true;
-        _gameStarting = true;
-      });
+        _allPlayersReady = allReady && hasEnoughPlayers;
 
-      // Si tous les joueurs sont prêts, on pourrait démarrer le jeu
-      _showInfoMessage("Tous les joueurs sont prêts! Le jeu va commencer...");
+        if (_allPlayersReady && !_gameStarting) {
+          _gameStarting = true;
 
-      // Démarrage du jeu après un délai
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          // Naviguer vers l'écran de jeu
-          context.goNamed(RouteNames.game, queryParameters: {'roomId': widget.roomId});
+          _showInfoMessage("Tous les joueurs sont prêts! Le jeu va commencer...");
+
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+              context.goNamed(RouteNames.game, queryParameters: {'roomId': widget.roomId});
+            }
+          });
         }
-      });
-    } else {
-      setState(() {
-        _allPlayersReady = false;
       });
     }
   }
@@ -127,7 +131,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     return WillPopScope(
       onWillPop: () async {
         _leaveRoom();
-        return false; // Empêcher le retour arrière standard
+        return false;
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
@@ -157,10 +161,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
               );
             }
 
-            // Vérifier si la partie a commencé
             final roomData = roomSnapshot.data!.data() as Map<String, dynamic>;
             if (roomData['gameStarted'] == true && !_gameStarting) {
-              // Rediriger vers l'écran de jeu si ce n'est pas déjà fait
               Future.microtask(() {
                 context.goNamed(RouteNames.game, queryParameters: {'roomId': widget.roomId});
               });
@@ -181,8 +183,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   return const Center(child: Text("Aucun joueur dans cette room"));
                 }
 
-                // Récupérer les données des joueurs
-                _players =
+                final players =
                     snapshot.data!.docs.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
                       return {
@@ -193,9 +194,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
                       };
                     }).toList();
 
-                // Vérifier si je suis l'hôte de la room
                 if (_currentUserId != null) {
-                  final currentPlayer = _players.firstWhere(
+                  final currentPlayer = players.firstWhere(
                     (player) => player['id'] == _currentUserId,
                     orElse: () => {'isReady': false, 'isHost': false},
                   );
@@ -203,12 +203,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   _isHost = currentPlayer['isHost'] ?? false;
                 }
 
-                // Vérifier si tous les joueurs sont prêts
-                _checkAllPlayersReady(_players);
+                if (_players.toString() != players.toString()) {
+                  _players = players;
+                  _shouldCheckReadyStatus = true;
+                }
 
                 return Column(
                   children: [
-                    // Code de la room
                     if (_roomCode.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.all(16.0),
@@ -245,13 +246,12 @@ class _LobbyScreenState extends State<LobbyScreen> {
                         ),
                       ),
 
-                    // Nombre de joueurs
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text("${_players.length}/6 joueurs", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text("${players.length}/6 joueurs", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           Text(
                             _allPlayersReady ? "Tous prêts !" : "En attente...",
                             style: TextStyle(
@@ -264,10 +264,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
                       ),
                     ),
 
-                    // Joueurs dans la room
-                    Expanded(child: _players.length >= 6 ? _buildPlayersGrid() : _buildPlayersRadar()),
+                    Expanded(child: players.length >= 6 ? _buildPlayersGrid(players) : _buildPlayersRadar(players)),
 
-                    // Bouton Prêt
                     Padding(
                       padding: const EdgeInsets.all(20.0),
                       child: ElevatedButton(
@@ -295,7 +293,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
-  Widget _buildPlayersGrid() {
+  Widget _buildPlayersGrid(List<Map<String, dynamic>> players) {
     return GridView.builder(
       padding: const EdgeInsets.all(16.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -304,15 +302,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
-      itemCount: _players.length,
+      itemCount: players.length,
       itemBuilder: (context, index) {
-        final player = _players[index];
+        final player = players[index];
         return _buildPlayerAvatar(player);
       },
     );
   }
 
-  Widget _buildPlayersRadar() {
+  Widget _buildPlayersRadar(List<Map<String, dynamic>> players) {
     return Center(
       child: SizedBox(
         width: 300,
@@ -320,7 +318,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // Cercle extérieur
             Container(
               width: 300,
               height: 300,
@@ -329,8 +326,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 border: Border.all(color: AppColors.primary.withOpacity(0.3), width: 2),
               ),
             ),
-
-            // Cercle milieu
             Container(
               width: 200,
               height: 200,
@@ -339,18 +334,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 border: Border.all(color: AppColors.primary.withOpacity(0.2), width: 1.5),
               ),
             ),
-
-            // Positionner les avatars des joueurs en cercle
-            ..._positionPlayersInCircle(),
-
-            // Cercle central
+            ..._positionPlayersInCircle(players),
             Container(
               width: 80,
               height: 80,
               decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryLight),
               child: Center(
                 child: Text(
-                  "${_players.length}/6",
+                  "${players.length}/6",
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary),
                 ),
               ),
@@ -361,14 +352,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
-  List<Widget> _positionPlayersInCircle() {
-    const radius = 120.0; // Rayon du cercle
+  List<Widget> _positionPlayersInCircle(List<Map<String, dynamic>> players) {
+    const radius = 120.0;
     final center = const Offset(150, 150);
     final widgets = <Widget>[];
 
-    for (int i = 0; i < _players.length; i++) {
-      final player = _players[i];
-      final angle = 2 * pi * i / max(1, _players.length);
+    for (int i = 0; i < players.length; i++) {
+      final player = players[i];
+      final angle = 2 * pi * i / max(1, players.length);
       final x = center.dx + radius * cos(angle);
       final y = center.dy + radius * sin(angle);
 
@@ -392,7 +383,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Avatar
           Container(
             width: 50,
             height: 50,
@@ -409,8 +399,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
             ),
           ),
           const SizedBox(height: 5),
-
-          // Nom du joueur
           Text(
             player['username'],
             style: TextStyle(
@@ -422,8 +410,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
-
-          // Badge hôte
           if (player['isHost'])
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -431,8 +417,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
               decoration: BoxDecoration(color: AppColors.primaryDark, borderRadius: BorderRadius.circular(10)),
               child: const Text("HÔTE", style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
             ),
-
-          // Statut
           Text(
             player['isReady'] ? "Prêt" : "En attente",
             style: TextStyle(fontSize: 10, color: player['isReady'] ? Colors.green : Colors.orange, fontWeight: FontWeight.bold),
