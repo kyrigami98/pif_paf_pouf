@@ -7,6 +7,7 @@ class Player {
   final bool isHost;
   final DateTime? joinedAt;
   final bool isActive;
+  final String? currentChoice; // Ajout pour suivre le choix actuel du joueur
 
   Player({
     required this.id,
@@ -15,6 +16,7 @@ class Player {
     this.isHost = false,
     this.joinedAt,
     this.isActive = true,
+    this.currentChoice,
   });
 
   // Factory pour créer un Player à partir d'un document Firestore
@@ -27,6 +29,7 @@ class Player {
       isHost: data['isHost'] ?? false,
       joinedAt: data['joinedAt'] != null ? (data['joinedAt'] as Timestamp).toDate() : null,
       isActive: data['isActive'] ?? true,
+      currentChoice: data['currentChoice'],
     );
   }
 
@@ -38,11 +41,12 @@ class Player {
       'isHost': isHost,
       'joinedAt': joinedAt != null ? Timestamp.fromDate(joinedAt!) : FieldValue.serverTimestamp(),
       'isActive': isActive,
+      'currentChoice': currentChoice,
     };
   }
 
   // Créer une copie avec des modifications
-  Player copyWith({String? username, bool? isReady, bool? isHost, DateTime? joinedAt, bool? isActive}) {
+  Player copyWith({String? username, bool? isReady, bool? isHost, DateTime? joinedAt, bool? isActive, String? currentChoice}) {
     return Player(
       id: this.id,
       username: username ?? this.username,
@@ -50,6 +54,7 @@ class Player {
       isHost: isHost ?? this.isHost,
       joinedAt: joinedAt ?? this.joinedAt,
       isActive: isActive ?? this.isActive,
+      currentChoice: currentChoice ?? this.currentChoice,
     );
   }
 
