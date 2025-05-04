@@ -5,8 +5,8 @@ import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/screens/auth_screen.dart';
 import 'package:pif_paf_pouf/screens/home_screen.dart';
 import 'package:pif_paf_pouf/screens/splash_screen.dart';
-import 'package:pif_paf_pouf/screens/radar_screen.dart';
 import 'package:pif_paf_pouf/screens/lobby_screen.dart';
+import 'package:pif_paf_pouf/screens/game_screen.dart';
 import 'package:pif_paf_pouf/theme/app_theme.dart';
 import '../firebase_options.dart';
 import 'package:go_router/go_router.dart';
@@ -20,13 +20,20 @@ class AppRouter {
       GoRoute(path: RouteList.splash, name: RouteNames.splash, builder: (context, state) => const SplashScreen()),
       GoRoute(path: RouteList.auth, name: RouteNames.auth, builder: (context, state) => const AuthScreen()),
       GoRoute(path: RouteList.home, name: RouteNames.home, builder: (context, state) => const HomeScreen()),
-      GoRoute(path: RouteList.radar, name: RouteNames.radar, builder: (context, state) => const RadarScreen()),
       GoRoute(
         path: RouteList.lobby,
         name: RouteNames.lobby,
         builder: (context, state) {
           final roomId = state.uri.queryParameters['roomId'] ?? '';
           return LobbyScreen(roomId: roomId);
+        },
+      ),
+      GoRoute(
+        path: RouteList.game,
+        name: RouteNames.game,
+        builder: (context, state) {
+          final roomId = state.uri.queryParameters['roomId'] ?? '';
+          return GameScreen(roomId: roomId);
         },
       ),
     ],
