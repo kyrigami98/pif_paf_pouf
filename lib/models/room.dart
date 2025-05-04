@@ -1,16 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pif_paf_pouf/models/player.dart';
 
-enum RoomStatus { waiting, ready, playing, completed }
+enum RoomStatus { lobby, in_game, finished }
 
 class Room {
   final String id;
-  final String roomCode;
+  final String joinCode;
   final String createdBy;
   final DateTime? createdAt;
   final int playerCount;
   final RoomStatus status;
-  final bool gameStarted;
   final int currentRound;
   final DateTime? roundStartTime;
   final String? winner;
@@ -19,12 +18,11 @@ class Room {
 
   Room({
     required this.id,
-    required this.roomCode,
+    required this.joinCode,
     required this.createdBy,
     this.createdAt,
     this.playerCount = 0,
-    this.status = RoomStatus.waiting,
-    this.gameStarted = false,
+    this.status = RoomStatus.lobby,
     this.currentRound = 0,
     this.roundStartTime,
     this.winner,
@@ -38,12 +36,11 @@ class Room {
 
     return Room(
       id: doc.id,
-      roomCode: data['roomCode'] ?? '',
+      joinCode: data['joinCode'] ?? '',
       createdBy: data['createdBy'] ?? '',
       createdAt: data['createdAt'] != null ? (data['createdAt'] as Timestamp).toDate() : null,
       playerCount: data['playerCount'] ?? 0,
-      status: _statusFromString(data['status'] ?? 'waiting'),
-      gameStarted: data['gameStarted'] ?? false,
+      status: _statusFromString(data['status'] ?? 'lobby'),
       currentRound: data['currentRound'] ?? 0,
       roundStartTime: data['roundStartTime'] != null ? (data['roundStartTime'] as Timestamp).toDate() : null,
       winner: data['winner'],
@@ -55,12 +52,11 @@ class Room {
   // Convertir en Map pour Firestore
   Map<String, dynamic> toFirestore() {
     return {
-      'roomCode': roomCode,
+      'joinCode': joinCode,
       'createdBy': createdBy,
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
       'playerCount': playerCount,
       'status': _statusToString(status),
-      'gameStarted': gameStarted,
       'currentRound': currentRound,
       'roundStartTime': roundStartTime != null ? Timestamp.fromDate(roundStartTime!) : null,
       'winner': winner,
@@ -70,12 +66,11 @@ class Room {
 
   // Créer une copie avec des modifications
   Room copyWith({
-    String? roomCode,
+    String? joinCode,
     String? createdBy,
     DateTime? createdAt,
     int? playerCount,
     RoomStatus? status,
-    bool? gameStarted,
     int? currentRound,
     DateTime? roundStartTime,
     String? winner,
@@ -83,13 +78,12 @@ class Room {
     List<Player>? players,
   }) {
     return Room(
-      id: this.id,
-      roomCode: roomCode ?? this.roomCode,
+      id: id,
+      joinCode: joinCode ?? this.joinCode,
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
       playerCount: playerCount ?? this.playerCount,
       status: status ?? this.status,
-      gameStarted: gameStarted ?? this.gameStarted,
       currentRound: currentRound ?? this.currentRound,
       roundStartTime: roundStartTime ?? this.roundStartTime,
       winner: winner ?? this.winner,
@@ -105,29 +99,25 @@ class Room {
 
   static RoomStatus _statusFromString(String status) {
     switch (status) {
-      case 'ready':
-        return RoomStatus.ready;
-      case 'playing':
-        return RoomStatus.playing;
-      case 'completed':
-        return RoomStatus.completed;
-      case 'waiting':
+      case 'in_game':
+        return RoomStatus.in_game;
+      case 'finished':
+        return RoomStatus.finished;
+      case 'lobby':
       default:
-        return RoomStatus.waiting;
+        return RoomStatus.lobby;
     }
   }
 
   static String _statusToString(RoomStatus status) {
     switch (status) {
-      case RoomStatus.ready:
-        return 'ready';
-      case RoomStatus.playing:
-        return 'playing';
-      case RoomStatus.completed:
-        return 'completed';
-      case RoomStatus.waiting:
+      case RoomStatus.in_game:
+        return 'in_game';
+      case RoomStatus.finished:
+        return 'finished';
+      case RoomStatus.lobby:
       default:
-        return 'waiting';
+        return 'lobby';
     }
   }
 }

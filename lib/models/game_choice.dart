@@ -5,7 +5,6 @@ import 'package:pif_paf_pouf/theme/colors.dart';
 enum Choice {
   pierre(
     displayName: 'Pierre',
-    emoji: '🪨',
     color: AppColors.rock, // Utilisation de la couleur thématique
     beats: ['ciseaux'],
     imagePath: 'assets/images/rock.png',
@@ -14,7 +13,6 @@ enum Choice {
 
   papier(
     displayName: 'Papier',
-    emoji: '📄',
     color: AppColors.paper, // Utilisation de la couleur thématique
     beats: ['pierre'],
     imagePath: 'assets/images/paper.png',
@@ -23,7 +21,6 @@ enum Choice {
 
   ciseaux(
     displayName: 'Ciseaux',
-    emoji: '✂️',
     color: AppColors.scissors, // Utilisation de la couleur thématique
     beats: ['papier'],
     imagePath: 'assets/images/scissors.png',
@@ -31,7 +28,6 @@ enum Choice {
   );
 
   final String displayName;
-  final String emoji;
   final Color color;
   final List<String> beats;
   final String imagePath;
@@ -39,7 +35,6 @@ enum Choice {
 
   const Choice({
     required this.displayName,
-    required this.emoji,
     required this.color,
     required this.beats,
     required this.imagePath,

@@ -7,6 +7,9 @@ import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/models/models.dart';
 import 'package:pif_paf_pouf/services/firebase_service.dart';
 import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:pif_paf_pouf/utils/animations.dart';
+import 'package:pif_paf_pouf/widgets/game_countdown_widget.dart';
+import 'package:pif_paf_pouf/widgets/player_status_widget.dart';
 
 class GameScreen extends StatefulWidget {
   final String roomId;
@@ -36,7 +39,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   bool _choiceConfirmed = false;
 
   // Variable pour suivre l'état du redémarrage
-  bool _isRestarting = false;
+  final bool _isRestarting = false;
 
   @override
   void initState() {
@@ -45,9 +48,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
     // Initialiser les contrôleurs d'animation
     _cardAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
-
     _resultAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-
     _countdownAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 3));
 
     _countdownAnimController.addStatusListener((status) {
@@ -75,7 +76,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         setState(() {
           _room = room;
           if (room != null) {
-            _activePlayers = room.players.where((p) => p.isActive).toList();
+            _activePlayers = room.players.where((p) => p.active).toList();
             _currentPlayer = _activePlayers.firstWhere((p) => p.id == _currentUserId, orElse: () => _activePlayers.first);
           }
         });
@@ -157,15 +158,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   // Détermine si le joueur actuel est un survivant/toujours en jeu
   bool _isCurrentPlayerActive() {
-    if (_room == null || _currentUserId == null) return false;
-
-    // Si nous avons des survivants spécifiques, vérifier si le joueur en fait partie
-    if (_room!.survivors != null && _room!.survivors!.isNotEmpty) {
-      return _room!.survivors!.contains(_currentUserId);
-    }
-
-    // Autrement, considérer que tout le monde est actif
-    return true;
+    if (_room == null || _currentUserId == null || _currentPlayer == null) return false;
+    return _currentPlayer!.active;
   }
 
   // Construire l'UI pour le choix du joueur
@@ -207,7 +201,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   color: _selectedChoice!.color.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(60),
                 ),
-                child: Center(child: Text(_selectedChoice!.emoji, style: const TextStyle(fontSize: 60))),
+                child: Padding(
+                  padding: const EdgeInsets.all(15.0),
+                  child: Image.asset(_selectedChoice!.imagePath, fit: BoxFit.contain),
+                ),
               ),
               const SizedBox(height: 24),
               Text(
@@ -215,9 +212,36 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 32),
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              const Text("En attente des autres joueurs...", style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
+              StreamBuilder<List<GameChoice>>(
+                stream: _firebaseService.roundChoicesStream(widget.roomId, _room!.currentRound),
+                builder: (context, snapshot) {
+                  final totalActive = _activePlayers.where((p) => p.active).length;
+                  final choicesMade = snapshot.data?.length ?? 0;
+
+                  return Column(
+                    children: [
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 60,
+                            height: 60,
+                            child: CircularProgressIndicator(
+                              value: totalActive > 0 ? choicesMade / totalActive : 0,
+                              strokeWidth: 6,
+                              backgroundColor: Colors.grey.shade300,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          Text("$choicesMade/$totalActive", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Text("En attente des autres joueurs...", style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
+                    ],
+                  );
+                },
+              ),
             ],
           ],
         ),
@@ -233,57 +257,57 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 16),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            childAspectRatio: 0.8,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            physics: const NeverScrollableScrollPhysics(),
             children: [_buildChoiceCard(Choice.pierre), _buildChoiceCard(Choice.papier), _buildChoiceCard(Choice.ciseaux)],
           ),
         ),
         const SizedBox(height: 24),
-        AnimatedBuilder(
-          animation: _countdownAnimController,
-          builder: (context, child) {
-            final progress = 1 - _countdownAnimController.value;
-            return Column(
-              children: [
-                LinearProgressIndicator(
-                  value: progress,
-                  backgroundColor: Colors.grey.shade300,
-                  color: _getProgressColor(progress),
-                  minHeight: 10,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Choix automatique dans ${(3 * progress).ceil()} secondes",
-                  style: TextStyle(fontSize: 14, color: _getProgressColor(progress)),
-                ),
-              ],
-            );
-          },
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: AnimatedBuilder(
+            animation: _countdownAnimController,
+            builder: (context, child) {
+              final progress = 1 - _countdownAnimController.value;
+              return GameCountdown(
+                progress: progress,
+                secondsRemaining: (3 * progress).ceil(),
+                isActive: _selectedChoice != null,
+              );
+            },
+          ),
         ),
         if (_selectedChoice != null) ...[
           const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: () => _confirmChoice(_selectedChoice!),
-            icon: const Icon(Icons.check_circle),
-            label: const Text("CONFIRMER"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _selectedChoice!.color,
-              foregroundColor: Colors.white,
+          AnimationUtils.withTapEffect(
+            onTap: () => _confirmChoice(_selectedChoice!),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              decoration: BoxDecoration(
+                color: _selectedChoice!.color,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [BoxShadow(color: _selectedChoice!.color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 8),
+                  const Text("CONFIRMER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
             ),
           ),
         ],
       ],
     );
-  }
-
-  Color _getProgressColor(double progress) {
-    if (progress > 0.6) return Colors.green;
-    if (progress > 0.3) return Colors.orange;
-    return Colors.red;
   }
 
   // Construire une carte de choix (pierre, papier, ciseaux)
@@ -303,17 +327,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           onTap: _choiceConfirmed ? null : () => _selectChoice(choice),
           borderRadius: BorderRadius.circular(16),
           child: Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(8.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(40)),
-                  child: Center(child: Text(choice.emoji, style: const TextStyle(fontSize: 40))),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(16)),
+                    padding: const EdgeInsets.all(8.0),
+                    child: Image.asset(choice.imagePath, fit: BoxFit.contain),
+                  ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Text(
                   choice.displayName,
                   style: TextStyle(
@@ -330,169 +355,140 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Afficher les résultats du round
+  // Construire l'UI pour l'affichage des résultats du round
   Widget _buildResultsUI() {
-    if (_roundResult == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_roundResult == null) return const SizedBox.shrink();
 
-    final isWinner = _currentUserId != null && _roundResult!.isPlayerWinner(_currentUserId!);
-    final isDraw = _roundResult!.isDraw;
+    // Déterminer si le joueur a été éliminé ce round
+    final bool wasEliminated = _roundResult!.eliminated.contains(_currentUserId);
 
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (isDraw) ...[
-            Lottie.asset('assets/lottie/draw.json', width: 160, height: 160),
-            const Text("MATCH NUL !", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          // Animation de résultat
+          Lottie.asset(
+            wasEliminated ? 'assets/lottie/eliminated.json' : 'assets/lottie/success.json',
+            width: 150,
+            height: 150,
+            controller: _resultAnimController,
+            onLoaded: (composition) {
+              _resultAnimController.forward();
+            },
+          ),
+
+          Text(
+            wasEliminated ? "Vous avez été éliminé !" : "Vous survivez ce round !",
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 24),
+
+          // Afficher les choix des joueurs
+          if (_roundResult!.playerChoices.isNotEmpty) ...[
+            const Text("Choix des joueurs :", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            const Text("Tous les joueurs ont fait le même choix.", style: TextStyle(fontSize: 18), textAlign: TextAlign.center),
-          ] else if (isWinner) ...[
-            Lottie.asset('assets/lottie/winner.json', width: 160, height: 160),
-            const Text(
-              "VOUS GAGNEZ !",
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.success),
-              textAlign: TextAlign.center,
-            ),
-          ] else ...[
-            Lottie.asset('assets/lottie/lost.json', width: 160, height: 160),
-            const Text(
-              "ÉLIMINÉ !",
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.error),
-              textAlign: TextAlign.center,
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              alignment: WrapAlignment.center,
+              children:
+                  _roundResult!.playerChoices.map((choice) {
+                    final player = _activePlayers.firstWhere(
+                      (p) => p.id == choice.playerId,
+                      orElse: () => Player(id: '', name: 'Inconnu', isReady: false, active: false),
+                    );
+                    final choiceObj = Choice.values.firstWhere((c) => c.name == choice.choice, orElse: () => Choice.pierre);
+
+                    return Column(
+                      children: [
+                        Container(
+                          width: 70,
+                          height: 70,
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: choiceObj.color.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(35),
+                            border: Border.all(
+                              color: choice.playerId == _currentUserId ? AppColors.primary : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                          child: Image.asset(choiceObj.imagePath),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          player.name,
+                          style: TextStyle(fontWeight: choice.playerId == _currentUserId ? FontWeight.bold : FontWeight.normal),
+                        ),
+                      ],
+                    );
+                  }).toList(),
             ),
           ],
 
           const SizedBox(height: 32),
 
-          _buildChoicesRecap(),
+          // Bouton pour continuer
+          if (_isCurrentPlayerActive())
+            AnimationUtils.withTapEffect(
+              onTap: _readyForNextRound,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(30),
+                  boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.play_arrow, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text("CONTINUER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
+  // Construire l'écran de fin de partie
+  Widget _buildGameOverScreen(bool isWinner) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Lottie.asset(isWinner ? 'assets/lottie/win.json' : 'assets/lottie/lose.json', width: 200, height: 200),
+          const SizedBox(height: 24),
+          Text(
+            isWinner ? "VICTOIRE !" : "PERDU !",
+            style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: isWinner ? AppColors.success : AppColors.error),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            isWinner ? "Félicitations, vous avez remporté la partie !" : "Dommage, vous avez perdu cette partie.",
+            style: const TextStyle(fontSize: 18),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 32),
-
           ElevatedButton.icon(
-            onPressed: _readyForNextRound,
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text("CONTINUER", style: TextStyle(fontSize: 18)),
+            onPressed: () => context.go(RouteList.home),
+            icon: const Icon(Icons.home),
+            label: const Text('RETOUR À L\'ACCUEIL'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ],
       ),
     );
-  }
-
-  // Récapitulatif des choix des joueurs
-  Widget _buildChoicesRecap() {
-    if (_roundResult == null || _roundResult!.playerChoices.isEmpty) {
-      return const SizedBox();
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Choix des joueurs", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const Divider(),
-          const SizedBox(height: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 200),
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: _roundResult!.playerChoices.length,
-              separatorBuilder: (context, index) => const Divider(height: 8),
-              itemBuilder: (context, index) {
-                final choice = _roundResult!.playerChoices[index];
-                final player = _activePlayers.firstWhere(
-                  (p) => p.id == choice.playerId,
-                  orElse: () => Player(id: choice.playerId, username: "Joueur inconnu"),
-                );
-
-                final isWinner = _roundResult!.isPlayerWinner(choice.playerId);
-
-                return Row(
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: isWinner ? AppColors.success.withOpacity(0.2) : AppColors.cardDark,
-                      radius: 20,
-                      child: Text(
-                        player.initial,
-                        style: TextStyle(fontWeight: FontWeight.bold, color: isWinner ? AppColors.success : Colors.black87),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        player.username,
-                        style: TextStyle(fontWeight: player.id == _currentUserId ? FontWeight.bold : FontWeight.normal),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: choice.choice.color.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(choice.choice.emoji, style: const TextStyle(fontSize: 18)),
-                          const SizedBox(width: 8),
-                          Text(choice.choice.displayName),
-                        ],
-                      ),
-                    ),
-                    if (isWinner)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8.0),
-                        child: Icon(Icons.emoji_events, color: AppColors.success, size: 20),
-                      ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Ajout d'une nouvelle fonction pour jouer à nouveau
-  Future<void> _playAgain() async {
-    try {
-      setState(() {
-        // Désactiver le bouton pendant le traitement
-        _isRestarting = true;
-      });
-
-      // Créer une nouvelle room avec les mêmes joueurs
-      final result = await _firebaseService.createNewGameWithSamePlayers(widget.roomId);
-
-      if (result['success'] && mounted) {
-        // Naviguer vers la nouvelle salle
-        context.goNamed(RouteNames.lobby, queryParameters: {'roomId': result['roomId']});
-      } else {
-        _showErrorMessage(result['message'] ?? "Impossible de créer une nouvelle partie");
-      }
-    } catch (e) {
-      _showErrorMessage("Erreur lors de la création d'une nouvelle partie: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRestarting = false;
-        });
-      }
-    }
   }
 
   @override
@@ -540,7 +536,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               builder:
                   (context) => AlertDialog(
                     title: const Text("Quitter la partie ?"),
-                    content: const Text("Voulez-vous vraiment quitter cette partie ?"),
+                    content: const Text("Voulez-vous vraiment quitter cette partie ? Vous serez éliminé définitivement."),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
                       TextButton(
@@ -556,20 +552,28 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           },
         ),
         actions: [
-          // Indicateur de joueurs actifs
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-            child: Row(
-              children: [
-                const Icon(Icons.people, size: 16, color: Colors.white),
-                const SizedBox(width: 4),
-                Text(
-                  "${_room!.survivors?.length ?? _activePlayers.length}",
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ],
+          // Indicateur de joueurs actifs avec animation
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.elasticOut,
+            builder: (context, value, child) {
+              return Transform.scale(scale: value, child: child);
+            },
+            child: Container(
+              margin: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+              child: Row(
+                children: [
+                  const Icon(Icons.people, size: 16, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    "${_activePlayers.where((p) => p.active).length}",
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -599,114 +603,56 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
             if (snapshot.hasData) {
               _room = snapshot.data;
-              _activePlayers = _room!.players.where((p) => p.isActive).toList();
+              _activePlayers = _room!.players;
+
+              // Mise à jour du joueur actuel
+              if (_currentUserId != null) {
+                _currentPlayer = _activePlayers.firstWhere((p) => p.id == _currentUserId, orElse: () => _activePlayers.first);
+              }
 
               // Vérifier si la partie est terminée
-              if (_room!.winner != null) {
+              if (_room!.status == RoomStatus.finished) {
                 final isWinner = _room!.winner == _currentUserId;
                 return _buildGameOverScreen(isWinner);
               }
 
-              return StreamBuilder<RoundResult?>(
-                stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
-                builder: (context, resultSnapshot) {
-                  if (resultSnapshot.hasData && resultSnapshot.data!.completed) {
-                    _roundResult = resultSnapshot.data;
-                    // Ne pas montrer les résultats s'ils ont déjà été vus et que le joueur est prêt pour le prochain round
-                    if (_showResults == false && _currentPlayer?.isReady == true) {
-                      return _buildChoiceUI();
-                    } else {
-                      // Autrement, montrer les résultats
-                      _showResults = true;
-                      return _buildResultsUI();
-                    }
-                  }
+              return Column(
+                children: [
+                  // Widget de statut des joueurs
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: PlayerStatusWidget(players: _activePlayers, currentUserId: _currentUserId, showChoices: _showResults),
+                  ),
 
-                  // Si pas de résultats, montrer l'interface de choix
-                  return _buildChoiceUI();
-                },
+                  // Contenu principal
+                  Expanded(
+                    child: StreamBuilder<RoundResult?>(
+                      stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
+                      builder: (context, resultSnapshot) {
+                        if (resultSnapshot.hasData && resultSnapshot.data!.resultAnnounced) {
+                          _roundResult = resultSnapshot.data;
+
+                          // Ne pas montrer les résultats s'ils ont déjà été vus et que le joueur est prêt pour le prochain round
+                          if (_showResults == false && _currentPlayer?.isReady == true) {
+                            return _buildChoiceUI();
+                          } else {
+                            // Autrement, montrer les résultats
+                            _showResults = true;
+                            return _buildResultsUI();
+                          }
+                        }
+
+                        // Si pas de résultats, montrer l'interface de choix
+                        return _buildChoiceUI();
+                      },
+                    ),
+                  ),
+                ],
               );
             }
 
             return const Center(child: CircularProgressIndicator());
           },
-        ),
-      ),
-    );
-  }
-
-  // Écran de fin de partie modifié avec le bouton "Rejouer"
-  Widget _buildGameOverScreen(bool isWinner) {
-    // Trouver le gagnant
-    final winner = _room!.players.firstWhere(
-      (p) => p.id == _room!.winner,
-      orElse: () => Player(id: _room!.winner ?? '', username: "Joueur inconnu"),
-    );
-
-    return Scaffold(
-      backgroundColor: isWinner ? AppColors.success.withOpacity(0.2) : AppColors.background,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (isWinner) ...[
-              Lottie.asset('assets/lottie/trophy.json', width: 200, height: 200),
-              const Text(
-                "FÉLICITATIONS !",
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.success),
-              ),
-              const SizedBox(height: 16),
-              const Text("Vous avez remporté la victoire !", style: TextStyle(fontSize: 22)),
-            ] else ...[
-              Lottie.asset('assets/lottie/game_over.json', width: 200, height: 200),
-              Text(
-                "${winner.username} a gagné !",
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ],
-
-            const SizedBox(height: 40),
-
-            // Rangée de boutons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Bouton pour jouer à nouveau
-                ElevatedButton.icon(
-                  onPressed: _isRestarting ? null : _playAgain,
-                  icon:
-                      _isRestarting
-                          ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                          : const Icon(Icons.replay),
-                  label: const Text("REJOUER", style: TextStyle(fontSize: 18)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.secondary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  ),
-                ),
-
-                const SizedBox(width: 16),
-
-                // Bouton pour retourner à l'accueil
-                ElevatedButton.icon(
-                  onPressed: _exitGame,
-                  icon: const Icon(Icons.exit_to_app),
-                  label: const Text("ACCUEIL", style: TextStyle(fontSize: 18)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  ),
-                ),
-              ],
-            ),
-          ],
         ),
       ),
     );

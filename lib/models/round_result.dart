@@ -6,41 +6,60 @@ class RoundResult {
   final List<String> winners;
   final bool completed;
   final DateTime? completedAt;
+  final List<String> eliminated;
   final List<GameChoice> playerChoices;
+  final bool resultAnnounced;
 
   RoundResult({
     required this.roundNumber,
     this.winners = const [],
     this.completed = false,
     this.completedAt,
+    this.eliminated = const [],
     this.playerChoices = const [],
+    this.resultAnnounced = false,
   });
 
   // Factory pour créer un RoundResult à partir d'un document Firestore
   factory RoundResult.fromFirestore(DocumentSnapshot doc, {List<GameChoice> choices = const []}) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
 
-    // Extraire le numéro du round à partir de l'ID (ex: round1 -> 1)
-    int roundNumber = 0;
-    if (doc.id.startsWith('round')) {
-      final numStr = doc.id.substring(5);
+    // Extraire le numéro du round à partir de l'ID (ex: round_1 -> 1)
+    int roundNumber = data['roundNumber'] ?? 0;
+    if (roundNumber == 0 && doc.id.startsWith('round_')) {
+      final numStr = doc.id.substring(6);
       roundNumber = int.tryParse(numStr) ?? 0;
+    }
+
+    // Liste des joueurs non éliminés = gagnants
+    final elimList = data['eliminated'] is List ? List<String>.from(data['eliminated']) : <String>[];
+
+    // Liste des gagnants (non éliminés) - à déterminer à partir des choices si non spécifié
+    List<String> winners = [];
+    if (data['winners'] != null) {
+      winners = List<String>.from(data['winners']);
+    } else if (choices.isNotEmpty && elimList.isNotEmpty) {
+      // Calculer les gagnants à partir des joueurs non éliminés
+      winners = choices.map((c) => c.playerId).where((id) => !elimList.contains(id)).toList();
     }
 
     return RoundResult(
       roundNumber: roundNumber,
-      winners: data['winners'] != null ? List<String>.from(data['winners']) : [],
-      completed: data['completed'] ?? false,
+      winners: winners,
+      completed: data['resultAnnounced'] ?? false,
       completedAt: data['completedAt'] != null ? (data['completedAt'] as Timestamp).toDate() : null,
+      eliminated: elimList,
       playerChoices: choices,
+      resultAnnounced: data['resultAnnounced'] ?? false,
     );
   }
 
   // Convertir en Map pour Firestore
   Map<String, dynamic> toFirestore() {
     return {
-      'winners': winners,
-      'completed': completed,
+      'roundNumber': roundNumber,
+      'resultAnnounced': resultAnnounced,
+      'eliminated': eliminated,
       'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : FieldValue.serverTimestamp(),
     };
   }
@@ -51,22 +70,26 @@ class RoundResult {
     List<String>? winners,
     bool? completed,
     DateTime? completedAt,
+    List<String>? eliminated,
     List<GameChoice>? playerChoices,
+    bool? resultAnnounced,
   }) {
     return RoundResult(
       roundNumber: roundNumber ?? this.roundNumber,
       winners: winners ?? this.winners,
       completed: completed ?? this.completed,
       completedAt: completedAt ?? this.completedAt,
+      eliminated: eliminated ?? this.eliminated,
       playerChoices: playerChoices ?? this.playerChoices,
+      resultAnnounced: resultAnnounced ?? this.resultAnnounced,
     );
   }
 
-  // Détermine si un joueur spécifique est un gagnant
+  // Détermine si un joueur spécifique est un gagnant (non éliminé)
   bool isPlayerWinner(String playerId) {
-    return winners.contains(playerId);
+    return !eliminated.contains(playerId);
   }
 
-  // Vérifie s'il y a une égalité
-  bool get isDraw => winners.isEmpty;
+  // Vérifie s'il y a une égalité (personne n'est éliminé)
+  bool get isDraw => eliminated.isEmpty && playerChoices.isNotEmpty;
 }
