@@ -1,25 +1,26 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pif_paf_pouf/theme/colors.dart';
 
 enum Choice {
   pierre(
     displayName: 'Pierre',
     emoji: '🪨',
-    color: Color(0xFF8B4513), // Marron
+    color: AppColors.rock, // Utilisation de la couleur thématique
     beats: ['ciseaux'],
   ),
 
   papier(
     displayName: 'Papier',
     emoji: '📄',
-    color: Color(0xFF1E88E5), // Bleu
+    color: AppColors.paper, // Utilisation de la couleur thématique
     beats: ['pierre'],
   ),
 
   ciseaux(
     displayName: 'Ciseaux',
     emoji: '✂️',
-    color: Color(0xFFE53935), // Rouge
+    color: AppColors.scissors, // Utilisation de la couleur thématique
     beats: ['papier'],
   );
 
