@@ -589,4 +589,59 @@ class FirebaseService {
       return false;
     }
   }
+
+  // Créer une nouvelle partie avec les mêmes joueurs
+  Future<Map<String, dynamic>> createNewGameWithSamePlayers(String oldRoomId) async {
+    try {
+      // Récupérer les informations de la room actuelle
+      final oldRoom = await getRoom(oldRoomId);
+      if (oldRoom == null) {
+        return {'success': false, 'message': 'La salle d\'origine n\'existe plus'};
+      }
+
+      // Générer un code unique pour la nouvelle room
+      String roomCode = _generateRoomCode();
+      bool isUnique = false;
+
+      while (!isUnique) {
+        final checkCode = await _firestore.collection('rooms').where('roomCode', isEqualTo: roomCode).limit(1).get();
+        if (checkCode.docs.isEmpty) {
+          isUnique = true;
+        } else {
+          roomCode = _generateRoomCode();
+        }
+      }
+
+      // Créer la nouvelle room
+      final roomRef = _firestore.collection('rooms').doc();
+      final roomId = roomRef.id;
+
+      // Créer un objet Room
+      final room = Room(
+        id: roomId,
+        roomCode: roomCode,
+        createdBy: oldRoom.createdBy,
+        playerCount: oldRoom.players.length,
+        status: RoomStatus.waiting,
+        currentRound: 0,
+        gameStarted: false,
+      );
+
+      await roomRef.set(room.toFirestore());
+
+      // Ajouter tous les joueurs de l'ancienne room à la nouvelle
+      for (final player in oldRoom.players) {
+        if (player.isActive) {
+          // Réinitialiser isReady à false pour tous les joueurs
+          final newPlayer = player.copyWith(isReady: false);
+          await roomRef.collection('players').doc(player.id).set(newPlayer.toFirestore());
+        }
+      }
+
+      return {'success': true, 'roomId': roomId, 'roomCode': roomCode};
+    } catch (e) {
+      debugPrint('Erreur lors de la création d\'une nouvelle partie: $e');
+      return {'success': false, 'message': 'Erreur: $e'};
+    }
+  }
 }

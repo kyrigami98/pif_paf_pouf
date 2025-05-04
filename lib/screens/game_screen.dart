@@ -35,6 +35,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   Choice? _selectedChoice;
   bool _choiceConfirmed = false;
 
+  // Variable pour suivre l'état du redémarrage
+  bool _isRestarting = false;
+
   @override
   void initState() {
     super.initState();
@@ -464,6 +467,34 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
+  // Ajout d'une nouvelle fonction pour jouer à nouveau
+  Future<void> _playAgain() async {
+    try {
+      setState(() {
+        // Désactiver le bouton pendant le traitement
+        _isRestarting = true;
+      });
+
+      // Créer une nouvelle room avec les mêmes joueurs
+      final result = await _firebaseService.createNewGameWithSamePlayers(widget.roomId);
+
+      if (result['success'] && mounted) {
+        // Naviguer vers la nouvelle salle
+        context.goNamed(RouteNames.lobby, queryParameters: {'roomId': result['roomId']});
+      } else {
+        _showErrorMessage(result['message'] ?? "Impossible de créer une nouvelle partie");
+      }
+    } catch (e) {
+      _showErrorMessage("Erreur lors de la création d'une nouvelle partie: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRestarting = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Vérifier si la room a été supprimée
@@ -604,7 +635,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Écran de fin de partie
+  // Écran de fin de partie modifié avec le bouton "Rejouer"
   Widget _buildGameOverScreen(bool isWinner) {
     // Trouver le gagnant
     final winner = _room!.players.firstWhere(
@@ -637,15 +668,43 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
             const SizedBox(height: 40),
 
-            ElevatedButton.icon(
-              onPressed: _exitGame,
-              icon: const Icon(Icons.exit_to_app),
-              label: const Text("RETOUR À L'ACCUEIL", style: TextStyle(fontSize: 18)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
+            // Rangée de boutons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Bouton pour jouer à nouveau
+                ElevatedButton.icon(
+                  onPressed: _isRestarting ? null : _playAgain,
+                  icon:
+                      _isRestarting
+                          ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                          : const Icon(Icons.replay),
+                  label: const Text("REJOUER", style: TextStyle(fontSize: 18)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.secondary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  ),
+                ),
+
+                const SizedBox(width: 16),
+
+                // Bouton pour retourner à l'accueil
+                ElevatedButton.icon(
+                  onPressed: _exitGame,
+                  icon: const Icon(Icons.exit_to_app),
+                  label: const Text("ACCUEIL", style: TextStyle(fontSize: 18)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
