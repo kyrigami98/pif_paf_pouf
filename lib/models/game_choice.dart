@@ -38,6 +38,21 @@ class GameChoice {
     final gameRulesService = GameRulesService();
     final List<String> eliminated = [];
 
+    // S'il n'y a qu'un seul choix, personne n'est éliminé
+    if (gameChoices.length == 1) return [];
+
+    // Vérifier si tous les joueurs ont fait le même choix (égalité parfaite)
+    bool allSameChoice = true;
+    final firstChoice = gameChoices.first.choice;
+    for (int i = 1; i < gameChoices.length; i++) {
+      if (gameChoices[i].choice != firstChoice) {
+        allSameChoice = false;
+        break;
+      }
+    }
+    // Si tous les joueurs ont fait le même choix, aucun n'est éliminé
+    if (allSameChoice) return [];
+
     // Pour chaque paire de joueurs, déterminer qui gagne
     for (int i = 0; i < gameChoices.length; i++) {
       final choice1 = gameRulesService.getChoiceById(gameChoices[i].choice);

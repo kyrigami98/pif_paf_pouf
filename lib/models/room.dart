@@ -15,6 +15,8 @@ class Room {
   final String? winner;
   final List<String>? survivors;
   final List<Player> players;
+  final String? nextRoomId;
+  final String? nextRoomCode;
 
   Room({
     required this.id,
@@ -28,6 +30,8 @@ class Room {
     this.winner,
     this.survivors,
     this.players = const [],
+    this.nextRoomId,
+    this.nextRoomCode,
   });
 
   // Factory pour créer un Room à partir d'un document Firestore
@@ -46,6 +50,8 @@ class Room {
       winner: data['winner'],
       survivors: data['survivors'] != null ? List<String>.from(data['survivors']) : null,
       players: players,
+      nextRoomId: data['nextRoomId'],
+      nextRoomCode: data['nextRoomCode'],
     );
   }
 
@@ -61,6 +67,8 @@ class Room {
       'roundStartTime': roundStartTime != null ? Timestamp.fromDate(roundStartTime!) : null,
       'winner': winner,
       'survivors': survivors,
+      'nextRoomId': nextRoomId,
+      'nextRoomCode': nextRoomCode,
     };
   }
 
@@ -76,6 +84,8 @@ class Room {
     String? winner,
     List<String>? survivors,
     List<Player>? players,
+    String? nextRoomId,
+    String? nextRoomCode,
   }) {
     return Room(
       id: id,
@@ -89,6 +99,8 @@ class Room {
       winner: winner ?? this.winner,
       survivors: survivors ?? this.survivors,
       players: players ?? this.players,
+      nextRoomId: nextRoomId ?? this.nextRoomId,
+      nextRoomCode: nextRoomCode ?? this.nextRoomCode,
     );
   }
 

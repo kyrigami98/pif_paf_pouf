@@ -9,6 +9,7 @@ class RoundResult {
   final List<String> eliminated;
   final List<GameChoice> playerChoices;
   final bool resultAnnounced;
+  final bool isTie;
 
   RoundResult({
     required this.roundNumber,
@@ -18,6 +19,7 @@ class RoundResult {
     this.eliminated = const [],
     this.playerChoices = const [],
     this.resultAnnounced = false,
+    this.isTie = false,
   });
 
   // Factory pour créer un RoundResult à partir d'un document Firestore
@@ -33,12 +35,13 @@ class RoundResult {
 
     // Liste des joueurs non éliminés = gagnants
     final elimList = data['eliminated'] is List ? List<String>.from(data['eliminated']) : <String>[];
+    final bool isTie = data['isTie'] ?? (elimList.isEmpty && choices.length > 1);
 
     // Liste des gagnants (non éliminés) - à déterminer à partir des choices si non spécifié
     List<String> winners = [];
     if (data['winners'] != null) {
       winners = List<String>.from(data['winners']);
-    } else if (choices.isNotEmpty && elimList.isNotEmpty) {
+    } else if (choices.isNotEmpty) {
       // Calculer les gagnants à partir des joueurs non éliminés
       winners = choices.map((c) => c.playerId).where((id) => !elimList.contains(id)).toList();
     }
@@ -51,6 +54,7 @@ class RoundResult {
       eliminated: elimList,
       playerChoices: choices,
       resultAnnounced: data['resultAnnounced'] ?? false,
+      isTie: isTie,
     );
   }
 
@@ -73,6 +77,7 @@ class RoundResult {
     List<String>? eliminated,
     List<GameChoice>? playerChoices,
     bool? resultAnnounced,
+    bool? isTie,
   }) {
     return RoundResult(
       roundNumber: roundNumber ?? this.roundNumber,
@@ -82,6 +87,7 @@ class RoundResult {
       eliminated: eliminated ?? this.eliminated,
       playerChoices: playerChoices ?? this.playerChoices,
       resultAnnounced: resultAnnounced ?? this.resultAnnounced,
+      isTie: isTie ?? this.isTie,
     );
   }
 
@@ -91,5 +97,5 @@ class RoundResult {
   }
 
   // Vérifie s'il y a une égalité (personne n'est éliminé)
-  bool get isDraw => eliminated.isEmpty && playerChoices.isNotEmpty;
+  bool get isDraw => isTie || (eliminated.isEmpty && playerChoices.length > 1);
 }

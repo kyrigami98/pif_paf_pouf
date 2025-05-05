@@ -161,6 +161,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
+  void _showInfoMessage(String message) {
+    alertKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(8),
+      ),
+    );
+  }
+
   // Détermine si le joueur actuel est un survivant/toujours en jeu
   bool _isCurrentPlayerActive() {
     if (_room == null || _currentUserId == null || _currentPlayer == null) return false;
@@ -481,7 +493,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               // Logique pour rejouer avec les mêmes joueurs
               _firebaseService.createNewGameWithSamePlayers(widget.roomId).then((result) {
                 if (result['success'] && mounted) {
-                  context.goNamed(RouteNames.lobby, queryParameters: {'roomId': result['roomId']});
+                  // On ne navigue plus directement ici - la redirection se fera via le stream
+                  _showInfoMessage("Création d'une nouvelle partie...");
                 } else {
                   _showErrorMessage("Impossible de créer une nouvelle partie");
                 }
@@ -660,6 +673,24 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
             if (snapshot.hasData) {
               _room = snapshot.data;
+
+              // Vérifier s'il y a une nouvelle salle à rejoindre (pour le rejeu)
+              if (_room?.nextRoomId != null && mounted) {
+                Future.microtask(() {
+                  context.goNamed(RouteNames.lobby, queryParameters: {'roomId': _room!.nextRoomId});
+                });
+                return const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 20),
+                      Text("Redirection vers la nouvelle partie...", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                );
+              }
+
               _activePlayers = _room!.players;
 
               // Mise à jour du joueur actuel

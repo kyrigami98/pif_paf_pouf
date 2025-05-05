@@ -375,10 +375,15 @@ class RoomService {
       // Utiliser la méthode de la classe GameChoice pour déterminer les joueurs éliminés
       final List<String> eliminated = GameChoice.determineEliminated(gameChoices);
 
+      // Vérifier s'il y a une égalité (personne n'est éliminé)
+      final bool isTie = eliminated.isEmpty && gameChoices.length > 1;
+
       // Mettre à jour les joueurs éliminés dans le document du round
       await _firestore.collection('rooms').doc(roomId).collection('rounds').doc(roundId).update({
         'eliminated': eliminated,
         'resultAnnounced': true,
+        'isTie': isTie,
+        'completedAt': FieldValue.serverTimestamp(),
       });
 
       // Actualiser le statut 'active' des joueurs éliminés
@@ -393,20 +398,8 @@ class RoomService {
       final playersSnapshot = await _firestore.collection('rooms').doc(roomId).collection('players').get();
       final activePlayerCount = playersSnapshot.docs.where((doc) => doc.data()['active'] == true).length;
 
-      if (activePlayerCount <= 1) {
-        // Fin de partie - un seul survivant (ou aucun en cas d'impasse)
-        String? winner;
-        if (activePlayerCount == 1) {
-          winner = playersSnapshot.docs.firstWhere((doc) => doc.data()['active'] == true).id;
-
-          // Incrémenter le nombre de victoires du gagnant
-          await _firestore.collection('rooms').doc(roomId).collection('players').doc(winner).update({
-            'wins': FieldValue.increment(1),
-          });
-        }
-
-        await _firestore.collection('rooms').doc(roomId).update({'status': 'finished', 'winner': winner});
-      } else {
+      // Si égalité ou plusieurs joueurs actifs, continuer au prochain round
+      if (isTie || activePlayerCount > 1) {
         // Préparer le prochain round
         await _firestore.collection('rooms').doc(roomId).update({
           'currentRound': currentRound + 1,
@@ -420,6 +413,21 @@ class RoomService {
           'resultAnnounced': false,
           'eliminated': [],
         });
+      }
+      // Sinon, on vérifie s'il ne reste qu'un seul joueur actif
+      else if (activePlayerCount <= 1) {
+        // Fin de partie - un seul survivant (ou aucun en cas d'impasse)
+        String? winner;
+        if (activePlayerCount == 1) {
+          winner = playersSnapshot.docs.firstWhere((doc) => doc.data()['active'] == true).id;
+
+          // Incrémenter le nombre de victoires du gagnant
+          await _firestore.collection('rooms').doc(roomId).collection('players').doc(winner).update({
+            'wins': FieldValue.increment(1),
+          });
+        }
+
+        await _firestore.collection('rooms').doc(roomId).update({'status': 'finished', 'winner': winner});
       }
 
       // Réinitialiser les choix des joueurs
@@ -521,6 +529,9 @@ class RoomService {
           'joinedAt': FieldValue.serverTimestamp(),
         });
       }
+
+      // Ajouter nextRoomId à l'ancienne room pour rediriger tous les clients
+      await _firestore.collection('rooms').doc(oldRoomId).update({'nextRoomId': roomId, 'nextRoomCode': joinCode});
 
       return {'success': true, 'roomId': roomId, 'roomCode': joinCode};
     } catch (e) {
