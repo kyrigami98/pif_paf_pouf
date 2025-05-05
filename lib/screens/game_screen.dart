@@ -5,11 +5,14 @@ import 'package:lottie/lottie.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/models/models.dart';
+import 'package:pif_paf_pouf/models/game_choice_model.dart';
 import 'package:pif_paf_pouf/services/firebase_service.dart';
+import 'package:pif_paf_pouf/services/game_rules_service.dart';
 import 'package:pif_paf_pouf/theme/colors.dart';
 import 'package:pif_paf_pouf/utils/animations.dart';
 import 'package:pif_paf_pouf/widgets/game_countdown_widget.dart';
 import 'package:pif_paf_pouf/widgets/player_status_widget.dart';
+import 'package:pif_paf_pouf/widgets/duel_result_visualizer.dart';
 
 class GameScreen extends StatefulWidget {
   final String roomId;
@@ -22,6 +25,7 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
+  final GameRulesService _gameRulesService = GameRulesService();
 
   // Variables d'état du jeu
   Room? _room;
@@ -35,16 +39,17 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   late AnimationController _cardAnimController;
   late AnimationController _resultAnimController;
   late AnimationController _countdownAnimController;
-  Choice? _selectedChoice;
+  GameChoiceModel? _selectedChoice;
   bool _choiceConfirmed = false;
 
-  // Variable pour suivre l'état du redémarrage
-  final bool _isRestarting = false;
+  // Liste des choix disponibles
+  late List<GameChoiceModel> _availableChoices;
 
   @override
   void initState() {
     super.initState();
     _currentUserId = _firebaseService.getCurrentUserId();
+    _availableChoices = _gameRulesService.getAvailableChoices();
 
     // Initialiser les contrôleurs d'animation
     _cardAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
@@ -86,8 +91,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     }
   }
 
-  // Sélection d'un choix (pierre, papier, ciseaux)
-  void _selectChoice(Choice choice) {
+  // Sélection d'un choix (pierre, papier, ciseaux, etc.)
+  void _selectChoice(GameChoiceModel choice) {
     HapticFeedback.mediumImpact();
     setState(() {
       _selectedChoice = choice;
@@ -102,7 +107,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   // Confirmer un choix
-  Future<void> _confirmChoice(Choice choice) async {
+  Future<void> _confirmChoice(GameChoiceModel choice) async {
     if (_choiceConfirmed || _room == null || _currentUserId == null) return;
 
     setState(() {
@@ -257,18 +262,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: GridView.count(
-            crossAxisCount: 3,
-            shrinkWrap: true,
-            childAspectRatio: 0.8,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [_buildChoiceCard(Choice.pierre), _buildChoiceCard(Choice.papier), _buildChoiceCard(Choice.ciseaux)],
-          ),
-        ),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: _buildChoicesGrid()),
         const SizedBox(height: 24),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -295,12 +289,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(30),
                 boxShadow: [BoxShadow(color: _selectedChoice!.color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
               ),
-              child: Row(
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 8),
-                  const Text("CONFIRMER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text("CONFIRMER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                 ],
               ),
             ),
@@ -310,9 +304,30 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Construire une carte de choix (pierre, papier, ciseaux)
-  Widget _buildChoiceCard(Choice choice) {
-    final isSelected = _selectedChoice == choice;
+  // Construire une grille de choix qui s'adapte dynamiquement
+  Widget _buildChoicesGrid() {
+    // Calcul du nombre de colonnes en fonction du nombre de choix
+    final int crossAxisCount = _availableChoices.length <= 3 ? 3 : (_availableChoices.length <= 6 ? 3 : 4);
+
+    return GridView.builder(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: 0.8,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _availableChoices.length,
+      itemBuilder: (context, index) {
+        return _buildChoiceCard(_availableChoices[index]);
+      },
+    );
+  }
+
+  // Construire une carte de choix (pierre, papier, ciseaux, etc.)
+  Widget _buildChoiceCard(GameChoiceModel choice) {
+    final isSelected = _selectedChoice?.id == choice.id;
 
     return AnimatedScale(
       scale: isSelected ? 1.1 : 1.0,
@@ -385,69 +400,43 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
           const SizedBox(height: 24),
 
-          // Afficher les choix des joueurs
-          if (_roundResult!.playerChoices.isNotEmpty) ...[
-            const Text("Choix des joueurs :", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 16,
-              runSpacing: 16,
-              alignment: WrapAlignment.center,
-              children:
-                  _roundResult!.playerChoices.map((choice) {
-                    final player = _activePlayers.firstWhere(
-                      (p) => p.id == choice.playerId,
-                      orElse: () => Player(id: '', name: 'Inconnu', isReady: false, active: false),
-                    );
-                    final choiceObj = Choice.values.firstWhere((c) => c.name == choice.choice, orElse: () => Choice.pierre);
-
-                    return Column(
-                      children: [
-                        Container(
-                          width: 70,
-                          height: 70,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: choiceObj.color.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(35),
-                            border: Border.all(
-                              color: choice.playerId == _currentUserId ? AppColors.primary : Colors.transparent,
-                              width: 2,
-                            ),
-                          ),
-                          child: Image.asset(choiceObj.imagePath),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          player.name,
-                          style: TextStyle(fontWeight: choice.playerId == _currentUserId ? FontWeight.bold : FontWeight.normal),
-                        ),
-                      ],
-                    );
-                  }).toList(),
+          // Utiliser le visualiseur de duels pour afficher les résultats détaillés
+          if (_roundResult!.playerChoices.isNotEmpty)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: DuelResultVisualizer(
+                  playerChoices: _roundResult!.playerChoices,
+                  players: _activePlayers,
+                  currentUserId: _currentUserId,
+                  eliminatedPlayers: _roundResult!.eliminated,
+                ),
+              ),
             ),
-          ],
 
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
 
           // Bouton pour continuer
           if (_isCurrentPlayerActive())
-            AnimationUtils.withTapEffect(
-              onTap: _readyForNextRound,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.play_arrow, color: Colors.white),
-                    SizedBox(width: 8),
-                    Text("CONTINUER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                  ],
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: AnimationUtils.withTapEffect(
+                onTap: _readyForNextRound,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.play_arrow, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text("CONTINUER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -486,8 +475,69 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: () {
+              // Logique pour rejouer avec les mêmes joueurs
+              _firebaseService.createNewGameWithSamePlayers(widget.roomId).then((result) {
+                if (result['success'] && mounted) {
+                  context.goNamed(RouteNames.lobby, queryParameters: {'roomId': result['roomId']});
+                } else {
+                  _showErrorMessage("Impossible de créer une nouvelle partie");
+                }
+              });
+            },
+            icon: const Icon(Icons.refresh),
+            label: const Text('REJOUER'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  // Construire un widget qui affiche les règles du jeu
+  Widget _buildRulesDialog() {
+    return AlertDialog(
+      title: const Text("Règles du jeu", style: TextStyle(fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var choice in _availableChoices) ...[
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+                  child: Image.asset(choice.imagePath),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(choice.displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    if (choice.beats.isNotEmpty)
+                      Text(
+                        "Bat: ${choice.beats.map((id) {
+                          final beatChoice = _gameRulesService.getChoiceById(id);
+                          return beatChoice?.displayName ?? id;
+                        }).join(', ')}",
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+            if (_availableChoices.last != choice) const Divider(),
+          ],
+        ],
+      ),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("FERMER"))],
     );
   }
 
@@ -552,6 +602,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           },
         ),
         actions: [
+          // Bouton pour afficher les règles
+          IconButton(
+            icon: const Icon(Icons.help_outline, color: Colors.white),
+            onPressed: () {
+              showDialog(context: context, builder: (context) => _buildRulesDialog());
+            },
+          ),
           // Indicateur de joueurs actifs avec animation
           TweenAnimationBuilder<double>(
             tween: Tween<double>(begin: 0.0, end: 1.0),

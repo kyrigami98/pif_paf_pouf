@@ -1,10 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:pif_paf_pouf/models/models.dart';
+import 'package:pif_paf_pouf/models/game_choice_model.dart';
+import 'package:pif_paf_pouf/services/game_rules_service.dart';
 import 'dart:math';
 
 class RoomService {
   final FirebaseFirestore _firestore;
+  final GameRulesService _gameRulesService = GameRulesService();
 
   RoomService(this._firestore);
 
@@ -238,17 +241,12 @@ class RoomService {
       final currentRound = roomDoc.data()?['currentRound'] ?? 1;
       final roundId = 'round_$currentRound';
 
-      // Convertir la chaîne en énumération Choice
-      final choice = Choice.fromString(choiceStr);
-
-      // Enregistrer le choix dans le document de round
-      final Map<String, dynamic> choices = {};
-      choices[playerId] = choice.name;
+      // Utiliser directement la chaîne de choix
+      final choices = {};
+      choices[playerId] = choiceStr;
 
       // Mettre à jour le choix dans rounds/{roundId}
-      await _firestore.collection('rooms').doc(roomId).collection('rounds').doc(roundId).update({
-        'choices.$playerId': choice.name,
-      });
+      await _firestore.collection('rooms').doc(roomId).collection('rounds').doc(roundId).update({'choices.$playerId': choiceStr});
 
       // Mettre à jour le statut du joueur également
       await _firestore.collection('rooms').doc(roomId).collection('players').doc(playerId).update({'currentChoice': choiceStr});
@@ -278,10 +276,10 @@ class RoomService {
       final data = roundDoc.data() ?? {};
       final choices = data['choices'] as Map<String, dynamic>? ?? {};
 
-      // Convertir la map en liste de GameChoice
+      // Convertir la map en liste de GameChoice (utiliser le choix comme chaîne)
       final result = <GameChoice>[];
       choices.forEach((playerId, choiceStr) {
-        result.add(GameChoice(playerId: playerId, choice: Choice.fromString(choiceStr), timestamp: null));
+        result.add(GameChoice(playerId: playerId, choice: choiceStr, timestamp: null));
       });
 
       return result;
@@ -302,7 +300,7 @@ class RoomService {
 
       final result = <GameChoice>[];
       choices.forEach((playerId, choiceStr) {
-        result.add(GameChoice(playerId: playerId, choice: Choice.fromString(choiceStr), timestamp: null));
+        result.add(GameChoice(playerId: playerId, choice: choiceStr, timestamp: null));
       });
 
       return result;
@@ -366,41 +364,16 @@ class RoomService {
       if (!roundDoc.exists) return;
 
       final roundData = roundDoc.data() ?? {};
-      final choices = roundData['choices'] as Map<String, dynamic>? ?? {};
+      final choicesMap = roundData['choices'] as Map<String, dynamic>? ?? {};
 
-      // Calculer les joueurs éliminés
-      final List<String> eliminated = [];
-
-      // Compter les types de choix
-      int pierreCount = 0, papierCount = 0, ciseauxCount = 0;
-      final Map<String, String> playerChoices = {};
-
-      choices.forEach((playerId, choiceStr) {
-        playerChoices[playerId] = choiceStr;
-        if (choiceStr == 'pierre') pierreCount++;
-        if (choiceStr == 'papier') papierCount++;
-        if (choiceStr == 'ciseaux') ciseauxCount++;
+      // Convertir les choix en GameChoice pour utiliser avec la logique d'élimination
+      final gameChoices = <GameChoice>[];
+      choicesMap.forEach((playerId, choiceStr) {
+        gameChoices.add(GameChoice(playerId: playerId, choice: choiceStr));
       });
 
-      // Déterminer les perdants (éliminés)
-      if (pierreCount > 0 && papierCount > 0 && ciseauxCount == 0) {
-        // Papier bat pierre - les pierres sont éliminées
-        playerChoices.forEach((playerId, choice) {
-          if (choice == 'pierre') eliminated.add(playerId);
-        });
-      } else if (papierCount > 0 && ciseauxCount > 0 && pierreCount == 0) {
-        // Ciseaux bat papier - les papiers sont éliminés
-        playerChoices.forEach((playerId, choice) {
-          if (choice == 'papier') eliminated.add(playerId);
-        });
-      } else if (pierreCount > 0 && ciseauxCount > 0 && papierCount == 0) {
-        // Pierre bat ciseaux - les ciseaux sont éliminés
-        playerChoices.forEach((playerId, choice) {
-          if (choice == 'ciseaux') eliminated.add(playerId);
-        });
-      }
-      // Si les trois choix sont présents ou si tous les joueurs ont fait le même choix,
-      // personne n'est éliminé
+      // Utiliser la méthode de la classe GameChoice pour déterminer les joueurs éliminés
+      final List<String> eliminated = GameChoice.determineEliminated(gameChoices);
 
       // Mettre à jour les joueurs éliminés dans le document du round
       await _firestore.collection('rooms').doc(roomId).collection('rounds').doc(roundId).update({

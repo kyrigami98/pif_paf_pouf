@@ -7,7 +7,7 @@ class PlayerStatusWidget extends StatelessWidget {
   final String? currentUserId;
   final bool showChoices;
 
-  const PlayerStatusWidget({Key? key, required this.players, this.currentUserId, this.showChoices = false}) : super(key: key);
+  const PlayerStatusWidget({super.key, required this.players, this.currentUserId, this.showChoices = false});
 
   @override
   Widget build(BuildContext context) {
