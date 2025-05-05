@@ -9,6 +9,7 @@ class DuelResultVisualizer extends StatelessWidget {
   final List<Player> players;
   final String? currentUserId;
   final List<String> eliminatedPlayers;
+  final bool isPerfectTie;
 
   const DuelResultVisualizer({
     super.key,
@@ -16,12 +17,19 @@ class DuelResultVisualizer extends StatelessWidget {
     required this.players,
     this.currentUserId,
     required this.eliminatedPlayers,
+    this.isPerfectTie = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final gameRulesService = GameRulesService();
     final availableChoices = gameRulesService.getAvailableChoices();
+
+    // Vérifier si c'est une égalité parfaite (tous ont fait le même choix)
+    if (isPerfectTie && playerChoices.isNotEmpty) {
+      // Affichage spécial pour l'égalité parfaite
+      return _buildPerfectTieView(gameRulesService, availableChoices);
+    }
 
     return SingleChildScrollView(
       child: Column(
@@ -109,9 +117,65 @@ class DuelResultVisualizer extends StatelessWidget {
                 ),
               );
             }).toList();
-          }).toList(),
+          }),
         ],
       ),
+    );
+  }
+
+  Widget _buildPerfectTieView(GameRulesService gameRulesService, List<GameChoiceModel> availableChoices) {
+    final firstChoice = playerChoices.first.choice;
+    final choiceModel = gameRulesService.getChoiceById(firstChoice) ?? availableChoices.first;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          "Égalité parfaite !",
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          "Tous les joueurs ont choisi la même chose",
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        Container(
+          width: 100,
+          height: 100,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: choiceModel.color.withOpacity(0.2), shape: BoxShape.circle),
+          child: Image.asset(choiceModel.imagePath, fit: BoxFit.contain),
+        ),
+        const SizedBox(height: 12),
+        Text(choiceModel.displayName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: choiceModel.color)),
+        const SizedBox(height: 24),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children:
+              players.where((p) => playerChoices.any((c) => c.playerId == p.id)).map((player) {
+                final isCurrentUser = player.id == currentUserId;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isCurrentUser ? AppColors.primary.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    player.name,
+                    style: TextStyle(
+                      fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
+                      color: isCurrentUser ? AppColors.primary : Colors.black87,
+                    ),
+                  ),
+                );
+              }).toList(),
+        ),
+      ],
     );
   }
 

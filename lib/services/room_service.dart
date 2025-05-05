@@ -372,17 +372,29 @@ class RoomService {
         gameChoices.add(GameChoice(playerId: playerId, choice: choiceStr));
       });
 
-      // Utiliser la méthode de la classe GameChoice pour déterminer les joueurs éliminés
-      final List<String> eliminated = GameChoice.determineEliminated(gameChoices);
+      // Vérifier d'abord si tous les joueurs ont fait le même choix (égalité parfaite)
+      bool isPerfectTie = false;
+      if (gameChoices.length > 1) {
+        final firstChoice = gameChoices.first.choice;
+        isPerfectTie = gameChoices.every((choice) => choice.choice == firstChoice);
+      }
+
+      // En cas d'égalité parfaite, personne n'est éliminé
+      List<String> eliminated = [];
+      if (!isPerfectTie) {
+        // Utiliser la méthode de la classe GameChoice pour déterminer les joueurs éliminés
+        eliminated = GameChoice.determineEliminated(gameChoices);
+      }
 
       // Vérifier s'il y a une égalité (personne n'est éliminé)
-      final bool isTie = eliminated.isEmpty && gameChoices.length > 1;
+      final bool isTie = isPerfectTie || (eliminated.isEmpty && gameChoices.length > 1);
 
       // Mettre à jour les joueurs éliminés dans le document du round
       await _firestore.collection('rooms').doc(roomId).collection('rounds').doc(roundId).update({
         'eliminated': eliminated,
         'resultAnnounced': true,
         'isTie': isTie,
+        'isPerfectTie': isPerfectTie,
         'completedAt': FieldValue.serverTimestamp(),
       });
 

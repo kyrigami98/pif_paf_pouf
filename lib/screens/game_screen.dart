@@ -39,8 +39,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   late AnimationController _cardAnimController;
   late AnimationController _resultAnimController;
   late AnimationController _countdownAnimController;
+  late AnimationController _tieBreakerCountdownController;
   GameChoiceModel? _selectedChoice;
   bool _choiceConfirmed = false;
+  bool _processingTieBreaker = false;
 
   // Liste des choix disponibles
   late List<GameChoiceModel> _availableChoices;
@@ -55,10 +57,17 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _cardAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _resultAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _countdownAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 3));
+    _tieBreakerCountdownController = AnimationController(vsync: this, duration: const Duration(seconds: 5));
 
     _countdownAnimController.addStatusListener((status) {
       if (status == AnimationStatus.completed && _selectedChoice != null && !_choiceConfirmed) {
         _confirmChoice(_selectedChoice!);
+      }
+    });
+
+    _tieBreakerCountdownController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && _processingTieBreaker) {
+        _readyForNextRound();
       }
     });
 
@@ -71,6 +80,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _cardAnimController.dispose();
     _resultAnimController.dispose();
     _countdownAnimController.dispose();
+    _tieBreakerCountdownController.dispose();
     super.dispose();
   }
 
@@ -134,6 +144,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         _roundResult = null;
         _selectedChoice = null;
         _choiceConfirmed = false;
+        _processingTieBreaker = false;
       });
 
       // Marquer comme prêt pour le prochain round
@@ -388,6 +399,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
     // Déterminer si le joueur a été éliminé ce round
     final bool wasEliminated = _roundResult!.eliminated.contains(_currentUserId);
+    final bool isPerfectTie = _roundResult!.isTie && _roundResult!.eliminated.isEmpty && _roundResult!.playerChoices.length > 1;
+
+    // Si c'est une égalité parfaite, lancer le compte à rebours pour passer automatiquement au round suivant
+    if (isPerfectTie && !_processingTieBreaker) {
+      _processingTieBreaker = true;
+      _tieBreakerCountdownController.reset();
+      _tieBreakerCountdownController.forward();
+    }
 
     return Center(
       child: Column(
@@ -395,7 +414,11 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         children: [
           // Animation de résultat
           Lottie.asset(
-            wasEliminated ? 'assets/lottie/eliminated.json' : 'assets/lottie/success.json',
+            wasEliminated
+                ? 'assets/lottie/eliminated.json'
+                : isPerfectTie
+                ? 'assets/lottie/tie.json'
+                : 'assets/lottie/success.json',
             width: 150,
             height: 150,
             controller: _resultAnimController,
@@ -405,10 +428,29 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           ),
 
           Text(
-            wasEliminated ? "Vous avez été éliminé !" : "Vous survivez ce round !",
+            wasEliminated
+                ? "Vous avez été éliminé !"
+                : isPerfectTie
+                ? "Égalité parfaite ! Nouveau round..."
+                : "Vous survivez ce round !",
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
+
+          // Afficher le compte à rebours en cas d'égalité parfaite
+          if (isPerfectTie) ...[
+            const SizedBox(height: 16),
+            AnimatedBuilder(
+              animation: _tieBreakerCountdownController,
+              builder: (context, child) {
+                final countdown = 5 - (_tieBreakerCountdownController.value * 5).floor();
+                return Text(
+                  "Prochain round dans $countdown secondes",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                );
+              },
+            ),
+          ],
 
           const SizedBox(height: 24),
 
@@ -422,6 +464,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   players: _activePlayers,
                   currentUserId: _currentUserId,
                   eliminatedPlayers: _roundResult!.eliminated,
+                  isPerfectTie: isPerfectTie,
                 ),
               ),
             ),
@@ -429,7 +472,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           const SizedBox(height: 16),
 
           // Bouton pour continuer
-          if (_isCurrentPlayerActive())
+          if (_isCurrentPlayerActive() && !isPerfectTie)
             Padding(
               padding: const EdgeInsets.only(bottom: 24),
               child: AnimationUtils.withTapEffect(

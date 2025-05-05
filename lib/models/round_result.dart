@@ -35,7 +35,19 @@ class RoundResult {
 
     // Liste des joueurs non éliminés = gagnants
     final elimList = data['eliminated'] is List ? List<String>.from(data['eliminated']) : <String>[];
-    final bool isTie = data['isTie'] ?? (elimList.isEmpty && choices.length > 1);
+
+    // Détecter si c'est une égalité parfaite
+    bool isTie = data['isTie'] ?? false;
+
+    // Si nous avons des choix, vérifier si tous les joueurs ont choisi la même chose
+    if (choices.length > 1) {
+      final firstChoice = choices.first.choice;
+      final allSameChoice = choices.every((c) => c.choice == firstChoice);
+      // C'est une égalité parfaite si tous ont choisi la même chose
+      if (allSameChoice) {
+        isTie = true;
+      }
+    }
 
     // Liste des gagnants (non éliminés) - à déterminer à partir des choices si non spécifié
     List<String> winners = [];
@@ -94,6 +106,14 @@ class RoundResult {
   // Détermine si un joueur spécifique est un gagnant (non éliminé)
   bool isPlayerWinner(String playerId) {
     return !eliminated.contains(playerId);
+  }
+
+  // Vérifie s'il y a une égalité parfaite (tous les joueurs ont fait le même choix)
+  bool get isPerfectTie {
+    if (playerChoices.length <= 1) return false;
+
+    final firstChoice = playerChoices.first.choice;
+    return playerChoices.every((choice) => choice.choice == firstChoice);
   }
 
   // Vérifie s'il y a une égalité (personne n'est éliminé)
