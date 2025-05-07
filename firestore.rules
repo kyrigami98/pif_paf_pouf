@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fonction pour vérifier si l'utilisateur est authentifié
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Fonction pour vérifier si l'utilisateur est membre d'une room
+    function isRoomMember(roomId) {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid));
+    }
+    
+    // Fonction pour vérifier si l'utilisateur est l'hôte d'une room
+    function isRoomHost(roomId) {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid)).data.isHost == true;
+    }
+    
+    // Règles pour la collection 'users'
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Règles pour la collection 'rooms'
+    match /rooms/{roomId} {
+      // Autoriser la lecture si l'utilisateur est membre de la room
+      allow read: if isRoomMember(roomId);
+      
+      // Autoriser la création d'une nouvelle room à tous les utilisateurs authentifiés
+      allow create: if isSignedIn();
+      
+      // Autoriser la mise à jour si l'utilisateur est membre ou l'hôte
+      allow update: if isRoomMember(roomId);
+      
+      // Autoriser la suppression uniquement à l'hôte
+      allow delete: if isRoomHost(roomId);
+      
+      // Règles pour la sous-collection 'players'
+      match /players/{playerId} {
+        // Autoriser la lecture à tous les membres de la room
+        allow read: if isRoomMember(roomId);
+        
+        // Autoriser l'écriture à son propre document ou à l'hôte
+        allow write: if isSignedIn() && (request.auth.uid == playerId || isRoomHost(roomId));
+      }
+      
+      // Règles pour la sous-collection 'rounds'
+      match /rounds/{roundId} {
+        // Autoriser la lecture à tous les membres de la room
+        allow read: if isRoomMember(roomId);
+        
+        // Autoriser l'écriture à tous les membres de la room
+        allow write: if isRoomMember(roomId);
+        
+        // Sous-collection 'choices' (si utilisée)
+        match /choices/{choiceId} {
+          // Autoriser la lecture à tous les membres de la room
+          allow read: if isRoomMember(roomId);
+          
+          // Autoriser l'écriture uniquement à son propre choix
+          allow write: if isSignedIn() && request.auth.uid == choiceId;
+        }
+      }
+    }
+    
+    // Fonction pour rechercher des rooms par code
+    match /rooms/{roomId} {
+      // Recherche par code de room autorisée pour tous les utilisateurs authentifiés
+      allow read: if isSignedIn() && 
+                  request.query.limit <= 1 &&
+                  request.query.where[0].fieldPath == "joinCode";
+    }
+  }
+}

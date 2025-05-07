@@ -1,88 +1,94 @@
-# pif_paf_pouf
+Mise à jour de la méthodologie (join via code)
+Création de la room
 
-PifPafPouf – nom décalé et ludique, basé sur des onomatopées comiques (« pif », « paf », « pouf »). Il évoque une ambiance cartoon et amusante pour les duels, idéal pour un public familial ou les plus jeunes.
+Génération d’un code unique (par exemple 6 ou 8 caractères alphanumériques) quand l’hôte appuie sur “Nouvelle partie”.
 
-🔧 Fonctionnalités principales à implémenter :
-Détection de proximité (5 mètres)
+Écriture d’un document rooms/{roomId} dans Firestore avec l’attribut joinCode et l’état lobby.
 
-Utilise Bluetooth Low Energy (BLE) ou Nearby (Google’s Nearby Connections API) pour détecter les téléphones proches.
+Phase de lobby (rejoindre via code)
 
-Flutter plugins possibles :
+Sur l’écran d’accueil, l’utilisateur :
 
-flutter_blue_plus
+Rentre son pseudo,
 
-nearby_connections
+Choisit “Rejoindre une partie” puis saisit le code.
 
-Déclenchement du “tchin” / cogner les téléphones
+Le client query Firestore pour trouver rooms où joinCode == saisi.
 
-Capteurs :
+Si trouvé et que players.count < 6, ajouter un sous-doc players/{playerId} dans la room.
 
-Accéléromètre + gyroscope pour détecter le mouvement synchrone d’un “tchin”.
+Validation “Prêt” et transition en jeu
 
-Plugin : sensors_plus
+Chaque joueur clique sur “Prêt” ; on met à jour son champ ready: true.
 
-Bonus : petite animation ou vibration lors de la détection du “cogne”.
+Quand tous les joueurs du lobby sont prêts, on passe rooms/{roomId}.status à in_game et on initialise currentRound = 1.
 
-Connexion entre appareils
+Boucle des rounds “battle royale”
 
-Une fois la proximité détectée, établir une session Firebase (Realtime Database ou Firestore).
+Pour chaque round tant que players.active.count > 1 :
 
-Chaque utilisateur rejoint une "room" automatiquement créée à la connexion.
+Collecte des choix : chaque joueur actif écrit son choix dans rooms/{roomId}/rounds/{roundId}/choices/{playerId}.
 
-Gameplay Pierre-Papier-Ciseaux
+Affichage des choix : on lit tous les docs choices/ et on les présente dans l’UI AVANT d’éliminer.
 
-Interface simple : trois boutons avec animations stylisées.
+Calcul et éliminations :
 
-Une fois les choix envoyés, Firestore synchronise les coups et affiche le gagnant.
+Déterminer les signes en lice,
 
-Système de groupe via code (alternative en ligne)
+Lister les playerId éliminés,
 
-Génération de code aléatoire pour rejoindre une partie à distance.
+Mettre à jour rooms/{roomId}/rounds/{roundId}.eliminated et, dans players/{playerId}, active: false.
 
-Stockage de la room dans Firestore avec un ID de groupe partageable.
+Incrémentation du round : rooms/{roomId}.currentRound += 1.
 
-🗃️ Firebase modules nécessaires :
-Authentication (anonyme) pour tracker les joueurs.
+Fin de partie et scores
 
-Firestore ou Realtime Database pour gérer les parties en direct.
+Quand il ne reste qu’un seul joueur actif :
 
-Cloud Functions (optionnel) pour calculer le résultat et gérer des règles de jeu.
+Mettre rooms/{roomId}.status = "finished",
 
-Firebase Analytics pour suivre l’utilisation et améliorer l’expérience.
+Incrémenter players/{winnerId}.wins dans la sous-collection players.
 
-🎨 UI/UX suggestions pour "PifPafPouf"
-Interface légère et joyeuse avec des animations cartoon (onoma : pif, paf, pouf).
+Proposer un bouton ”Rejouer” qui remet :
 
-Grosse importance sur l’effet “tchin” avec des feedbacks visuels.
+status = "lobby",
 
-Matchmaking visuel amusant quand deux téléphones se connectent.
+Tous les players/{playerId}.active = true et ready = false,
 
-Possibilité de collectionner des “victoires” sous forme de stickers ou badges.
+Supprime la sous-collection rounds (ou archive les anciens rounds si besoin).
 
+Schéma Firestore adapté
+typescript
+Copier
+Modifier
+rooms (collection)
+│
+├─ {roomId} (document)
+│   ├─ joinCode: string            // code généré pour rejoindre
+│   ├─ status: "lobby" | "in_game" | "finished"
+│   ├─ currentRound: number
+│   ├─ createdAt: Timestamp
+│
+│   ├─ players (subcollection)
+│   │   ├─ {playerId} (document)
+│   │   │   ├─ name: string
+│   │   │   ├─ active: boolean     // en lice ce round
+│   │   │   ├─ ready: boolean      // prêt pour démarrer
+│   │   │   └─ wins: number        // total de victoires
+│
+│   └─ rounds (subcollection)
+│       ├─ {roundId} (document)    // ex. "round_1", "round_2", …
+│       │   ├─ roundNumber: number
+│       │   ├─ startedAt: Timestamp
+│       │   ├─ resultAnnounced: boolean
+│       │   ├─ choices (map)       // playerId → "rock"|"paper"|"scissors"
+│       │   └─ eliminated: string[]// liste des playerId éliminés
+Points clés :
 
-Structure recommandée (sans clean archi)
+Le champ joinCode remplace le “tchin” : simple saisie et requête Firestore.
 
-lib/
-├── main.dart
-├── app/
-│   ├── app.dart             # Widget racine (MaterialApp, GoRouter, etc.)
-│   └── routes.dart          # Toutes les routes centralisées
-├── screens/                 # Par page principale de l'app
-│   ├── home/                # Écran d’accueil
-│   ├── game/                # Écran du jeu Pierre-Papier-Ciseaux
-│   ├── pairing/             # Écran de détection / appairage ("tchin")
-│   └── lobby/               # Attente de joueur, pré-match
-├── widgets/                 # Widgets réutilisables
-│   └── game_button.dart     # Exemple : bouton animé pour le choix
-├── services/                # Firebase, Bluetooth, Nearby, etc.
-│   ├── firebase_service.dart
-│   ├── nearby_service.dart
-│   └── motion_detector.dart # Pour gérer le “tchin” via gyroscope
-├── models/                  # Modèles simples (GameChoice, Player, etc.)
-├── utils/                   # Fonctions utilitaires (comparateur, helpers, etc.)
-├── theme/                   # Thème global, couleurs, typographies
-│   ├── colors.dart
-│   └── app_theme.dart
-└── constants/               # Textes statiques, tailles, assets
-    ├── strings.dart
-    └── assets.dart
+Les sous-collections players et rounds permettent de gérer l’état et l’historique de chaque partie.
+
+On conserve les victoires (wins) pour permettre plusieurs parties sans perdre les scores.
+
+Cette approche garantit un flux clair : création/join via code, lobby, rounds “battle royale” avec affichage des choix avant élimination, et réinitialisation pour rejouer tout en gardant les statistiques.

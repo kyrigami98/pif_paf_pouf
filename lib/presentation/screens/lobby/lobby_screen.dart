@@ -4,8 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
-import 'package:pif_paf_pouf/services/firebase_service.dart';
-import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:pif_paf_pouf/data/services/firebase_service.dart';
+import 'package:pif_paf_pouf/presentation/theme/colors.dart';
 import 'package:lottie/lottie.dart';
 import 'dart:async';
 import 'dart:math';
@@ -25,7 +25,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   bool _isReady = false;
   bool _allPlayersReady = false;
   List<Map<String, dynamic>> _players = [];
-  String _roomCode = "";
+  String _joinCode = "";
   bool _isHost = false;
   bool _gameStarting = false;
   bool _shouldCheckReadyStatus = false;
@@ -86,7 +86,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
       if (roomDoc.exists && mounted) {
         setState(() {
-          _roomCode = roomDoc.data()?['roomCode'] ?? '';
+          _joinCode = roomDoc.data()?['joinCode'] ?? '';
         });
       }
     }
@@ -130,7 +130,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   }
 
   void _copyRoomCode() {
-    Clipboard.setData(ClipboardData(text: _roomCode)).then((_) {
+    Clipboard.setData(ClipboardData(text: _joinCode)).then((_) {
       HapticFeedback.selectionClick();
       _showInfoMessage("Code copié dans le presse-papier");
     });
@@ -295,7 +295,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
             }
 
             final roomData = roomSnapshot.data!.data() as Map<String, dynamic>;
-            if (roomData['gameStarted'] == true && !_gameStarting) {
+            if (roomData['status'] == 'in_game' && !_gameStarting) {
               Future.microtask(() {
                 context.goNamed(RouteNames.game, queryParameters: {'roomId': widget.roomId});
               });
@@ -321,8 +321,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                       final data = doc.data() as Map<String, dynamic>;
                       return {
                         'id': doc.id,
-                        'username': data['username'] ?? 'Joueur inconnu',
-                        'isReady': data['isReady'] ?? false,
+                        'username': data['name'] ?? 'Joueur inconnu',
+                        'isReady': data['ready'] ?? false,
                         'isHost': data['isHost'] ?? false,
                       };
                     }).toList();
@@ -381,7 +381,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    _roomCode,
+                                    _joinCode,
                                     style: const TextStyle(
                                       fontSize: 32,
                                       letterSpacing: 5,
