@@ -1,20 +1,22 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:pif_paf_pouf/app/app.dart' show PifPafPoufMain;
+import 'package:pif_paf_pouf/firebase_options.dart';
 
-void main() {
-  runApp(const MainApp());
+Future<void> init() async {
+  //init flutter binding
+  WidgetsFlutterBinding.ensureInitialized();
+
+  //firebase init
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  //error widget style
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Container(color: Colors.white, child: const Center());
+  };
 }
 
-class MainApp extends StatelessWidget {
-  const MainApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text('Hello World!'),
-        ),
-      ),
-    );
-  }
+void main() {
+  init();
+  runApp(const PifPafPoufMain());
 }
