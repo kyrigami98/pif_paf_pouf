@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:pif_paf_pouf/models/player.dart';
+import 'package:pif_paf_pouf/data/models/user/player.dart';
 
 enum RoomStatus { lobby, in_game, finished }
 

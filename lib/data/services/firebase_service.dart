@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'package:pif_paf_pouf/models/models.dart';
-import 'package:pif_paf_pouf/services/room_service.dart';
+import 'package:pif_paf_pouf/data/models/models.dart';
+import 'package:pif_paf_pouf/data/services/room_service.dart';
 
 class FirebaseService {
   final FirebaseAuth _auth = FirebaseAuth.instance;

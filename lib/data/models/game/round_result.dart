@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:pif_paf_pouf/models/game_choice.dart';
+import 'package:pif_paf_pouf/data/models/game/game_choice.dart';
 
 class RoundResult {
   final int roundNumber;

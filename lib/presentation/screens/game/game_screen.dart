@@ -4,14 +4,14 @@ import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
-import 'package:pif_paf_pouf/models/models.dart';
-import 'package:pif_paf_pouf/services/firebase_service.dart';
-import 'package:pif_paf_pouf/services/game_rules_service.dart';
-import 'package:pif_paf_pouf/theme/colors.dart';
-import 'package:pif_paf_pouf/utils/animations.dart';
-import 'package:pif_paf_pouf/widgets/game_countdown_widget.dart';
-import 'package:pif_paf_pouf/widgets/player_status_widget.dart';
-import 'package:pif_paf_pouf/widgets/duel_result_visualizer.dart';
+import 'package:pif_paf_pouf/data/models/models.dart';
+import 'package:pif_paf_pouf/data/services/firebase_service.dart';
+import 'package:pif_paf_pouf/data/services/game_rules_service.dart';
+import 'package:pif_paf_pouf/presentation/theme/colors.dart';
+import 'package:pif_paf_pouf/presentation/animations/animations.dart';
+import 'package:pif_paf_pouf/presentation/common_widgets/game_countdown_widget.dart';
+import 'package:pif_paf_pouf/presentation/common_widgets/player_status_widget.dart';
+import 'package:pif_paf_pouf/presentation/common_widgets/duel_result_visualizer.dart';
 
 class GameScreen extends StatefulWidget {
   final String roomId;

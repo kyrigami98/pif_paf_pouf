@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:pif_paf_pouf/models/models.dart';
-import 'package:pif_paf_pouf/services/game_rules_service.dart';
+import 'package:pif_paf_pouf/data/models/models.dart';
+import 'package:pif_paf_pouf/data/services/game_rules_service.dart';
 import 'dart:math';
 
 class RoomService {

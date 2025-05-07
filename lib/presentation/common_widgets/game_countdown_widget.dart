@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:pif_paf_pouf/presentation/theme/colors.dart';
 
 class GameCountdown extends StatelessWidget {
   final double progress;

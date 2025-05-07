@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:pif_paf_pouf/models/game_choice_model.dart';
-import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:pif_paf_pouf/data/models/game/game_choice_model.dart';
+import 'package:pif_paf_pouf/presentation/theme/colors.dart';
 
 /// Service qui gère les règles du jeu et les choix disponibles
 class GameRulesService {

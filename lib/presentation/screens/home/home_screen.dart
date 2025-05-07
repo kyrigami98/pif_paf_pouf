@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
-import 'package:pif_paf_pouf/services/firebase_service.dart';
-import 'package:pif_paf_pouf/theme/colors.dart';
+import 'package:pif_paf_pouf/data/services/firebase_service.dart';
+import 'package:pif_paf_pouf/presentation/theme/colors.dart';
 import 'package:lottie/lottie.dart';
 
 class HomeScreen extends StatefulWidget {
