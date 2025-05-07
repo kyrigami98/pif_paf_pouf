@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/data/services/firebase_service.dart';
+import 'package:pif_paf_pouf/data/services/room_service.dart';
 import 'package:pif_paf_pouf/presentation/theme/colors.dart';
 import 'package:lottie/lottie.dart';
 import 'dart:async';
@@ -21,6 +22,8 @@ class LobbyScreen extends StatefulWidget {
 
 class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
+  final RoomService _roomService = RoomService(FirebaseFirestore.instance);
+
   String? _currentUserId;
   bool _isReady = false;
   bool _allPlayersReady = false;
@@ -80,7 +83,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
         _currentUserId = userId;
       });
 
-      await _firebaseService.updatePlayerStatus(widget.roomId, userId, false);
+      await _roomService.updatePlayerStatus(widget.roomId, userId, false);
 
       final roomDoc = await FirebaseFirestore.instance.collection('rooms').doc(widget.roomId).get();
 
@@ -105,7 +108,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
     if (_currentUserId == null) return;
 
     final newStatus = !_isReady;
-    await _firebaseService.updatePlayerStatus(widget.roomId, _currentUserId!, newStatus);
+    await _roomService.updatePlayerStatus(widget.roomId, _currentUserId!, newStatus);
 
     setState(() {
       _isReady = newStatus;
@@ -119,7 +122,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
     if (_currentUserId == null) return;
 
     try {
-      await _firebaseService.removePlayerFromRoom(widget.roomId, _currentUserId!);
+      await _roomService.removePlayerFromRoom(widget.roomId, _currentUserId!);
       if (mounted) {
         HapticFeedback.mediumImpact();
         context.go(RouteList.home);

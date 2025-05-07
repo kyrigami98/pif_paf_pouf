@@ -2,8 +2,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
-import 'dart:math';
-import 'package:pif_paf_pouf/data/models/models.dart';
 import 'package:pif_paf_pouf/data/services/room_service.dart';
 
 class FirebaseService {
@@ -80,70 +78,5 @@ class FirebaseService {
     await _auth.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('username');
-  }
-
-  // Méthodes déléguées au RoomService
-  Future<Map<String, dynamic>> createRoom(String username) {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) return Future.value({'success': false, 'message': 'Non connecté'});
-    return roomService.createRoom(userId, username);
-  }
-
-  Future<Map<String, dynamic>> joinRoomByCode(String roomCode, String username) {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) return Future.value({'success': false, 'message': 'Non connecté'});
-    return roomService.joinRoomByCode(roomCode, userId, username);
-  }
-
-  Future<Room?> getRoom(String roomId) {
-    return roomService.getRoom(roomId);
-  }
-
-  Stream<Room> roomStream(String roomId) {
-    return roomService.roomStream(roomId);
-  }
-
-  Stream<List<Player>> playersStream(String roomId) {
-    return roomService.playersStream(roomId);
-  }
-
-  Future<bool> updatePlayerStatus(String roomId, String playerId, bool isReady) {
-    return roomService.updatePlayerStatus(roomId, playerId, isReady);
-  }
-
-  Future<bool> removePlayerFromRoom(String roomId, String playerId) {
-    return roomService.removePlayerFromRoom(roomId, playerId);
-  }
-
-  Future<bool> makeChoice(String roomId, String playerId, String choiceStr) {
-    return roomService.makeChoice(roomId, playerId, choiceStr);
-  }
-
-  Future<List<GameChoice>> getRoundChoices(String roomId, int roundNumber) {
-    return roomService.getRoundChoices(roomId, roundNumber);
-  }
-
-  Stream<List<GameChoice>> roundChoicesStream(String roomId, int roundNumber) {
-    return roomService.roundChoicesStream(roomId, roundNumber);
-  }
-
-  Future<bool> checkAllChoicesMade(String roomId) {
-    return roomService.checkAllChoicesMade(roomId);
-  }
-
-  Future<RoundResult?> getRoundResult(String roomId, int roundNumber) {
-    return roomService.getRoundResult(roomId, roundNumber);
-  }
-
-  Stream<RoundResult?> roundResultStream(String roomId, int roundNumber) {
-    return roomService.roundResultStream(roomId, roundNumber);
-  }
-
-  Future<bool> resetRound(String roomId) {
-    return roomService.resetRound(roomId);
-  }
-
-  Future<Map<String, dynamic>> createNewGameWithSamePlayers(String oldRoomId) {
-    return roomService.createNewGameWithSamePlayers(oldRoomId);
   }
 }

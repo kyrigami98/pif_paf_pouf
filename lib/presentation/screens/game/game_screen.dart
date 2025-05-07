@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -7,11 +9,12 @@ import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/data/models/models.dart';
 import 'package:pif_paf_pouf/data/services/firebase_service.dart';
 import 'package:pif_paf_pouf/data/services/game_rules_service.dart';
+import 'package:pif_paf_pouf/data/services/room_service.dart';
 import 'package:pif_paf_pouf/presentation/theme/colors.dart';
-import 'package:pif_paf_pouf/presentation/animations/animations.dart';
 import 'package:pif_paf_pouf/presentation/common_widgets/game_countdown_widget.dart';
 import 'package:pif_paf_pouf/presentation/common_widgets/player_status_widget.dart';
 import 'package:pif_paf_pouf/presentation/common_widgets/duel_result_visualizer.dart';
+import 'package:gap/gap.dart'; // Utilisation du package gap pour les espacements
 
 class GameScreen extends StatefulWidget {
   final String roomId;
@@ -24,6 +27,8 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
+
+  final RoomService _roomService = RoomService(FirebaseFirestore.instance);
   final GameRulesService _gameRulesService = GameRulesService();
 
   // Variables d'état du jeu
@@ -33,30 +38,41 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   List<Player> _activePlayers = [];
   RoundResult? _roundResult;
   bool _showResults = false;
+  bool _extendedMode = false;
 
   // Animations
   late AnimationController _cardAnimController;
   late AnimationController _resultAnimController;
   late AnimationController _countdownAnimController;
   late AnimationController _tieBreakerCountdownController;
+  late AnimationController _floatingAnimController;
+  late AnimationController _pulseAnimController;
+
   GameChoiceModel? _selectedChoice;
   bool _choiceConfirmed = false;
   bool _processingTieBreaker = false;
 
   // Liste des choix disponibles
   late List<GameChoiceModel> _availableChoices;
+  final List<GameChoice> _currentRoundChoices = [];
+
+  // État de chargement
+  bool _isLoading = true;
+  bool _showTutorial = false;
 
   @override
   void initState() {
     super.initState();
     _currentUserId = _firebaseService.getCurrentUserId();
-    _availableChoices = _gameRulesService.getAvailableChoices();
 
     // Initialiser les contrôleurs d'animation
     _cardAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _resultAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _countdownAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 3));
     _tieBreakerCountdownController = AnimationController(vsync: this, duration: const Duration(seconds: 5));
+    _floatingAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))
+      ..repeat(reverse: true);
+    _pulseAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..repeat(reverse: true);
 
     _countdownAnimController.addStatusListener((status) {
       if (status == AnimationStatus.completed && _selectedChoice != null && !_choiceConfirmed) {
@@ -80,24 +96,72 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _resultAnimController.dispose();
     _countdownAnimController.dispose();
     _tieBreakerCountdownController.dispose();
+    _floatingAnimController.dispose();
+    _pulseAnimController.dispose();
+
+    // Nettoyer le cache Firebase pour cette room
+    _roomService.clearCache(widget.roomId);
+
     super.dispose();
   }
 
   Future<void> _loadInitialData() async {
     try {
-      final room = await _firebaseService.getRoom(widget.roomId);
+      setState(() {
+        _isLoading = true;
+      });
+
+      final room = await _roomService.getRoom(widget.roomId);
+
       if (mounted) {
+        final roomDoc = await FirebaseFirestore.instance.collection('rooms').doc(widget.roomId).get();
+        final extendedMode = roomDoc.data()?['extendedMode'] ?? false;
+
         setState(() {
           _room = room;
+          _extendedMode = extendedMode;
+          _availableChoices = _gameRulesService.getActiveChoices(extendedMode: extendedMode);
+
           if (room != null) {
             _activePlayers = room.players.where((p) => p.active).toList();
-            _currentPlayer = _activePlayers.firstWhere((p) => p.id == _currentUserId, orElse: () => _activePlayers.first);
+            _currentPlayer = _activePlayers.firstWhere(
+              (p) => p.id == _currentUserId,
+              orElse: () => _activePlayers.isNotEmpty ? _activePlayers.first : Player(id: '', name: 'Inconnu'),
+            );
           }
+
+          _isLoading = false;
+
+          // Afficher le tutorial une fois pour les nouveaux joueurs
+          _showTutorial = !_hasPreviouslyPlayed();
         });
+
+        if (_showTutorial) {
+          _saveTutorialShown();
+          // Afficher le tutorial après un court délai
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) _showTutorialDialog();
+          });
+        }
       }
     } catch (e) {
-      _showErrorMessage("Erreur de chargement: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        _showErrorMessage("Erreur de chargement: $e");
+      }
     }
+  }
+
+  bool _hasPreviouslyPlayed() {
+    // En production, utilisez SharedPreferences pour vérifier
+    // Pour l'exemple, je renvoie toujours false pour montrer le tutoriel
+    return false;
+  }
+
+  void _saveTutorialShown() {
+    // En production, utilisez SharedPreferences pour sauvegarder
   }
 
   // Sélection d'un choix (pierre, papier, ciseaux, etc.)
@@ -127,7 +191,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     HapticFeedback.heavyImpact();
 
     try {
-      await _firebaseService.makeChoice(widget.roomId, _currentUserId!, choice.name);
+      await _roomService.makeChoice(widget.roomId, _currentUserId!, choice.name);
     } catch (e) {
       _showErrorMessage("Erreur lors de la confirmation: $e");
       setState(() {
@@ -147,7 +211,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       });
 
       // Marquer comme prêt pour le prochain round
-      await _firebaseService.updatePlayerStatus(widget.roomId, _currentUserId!, true);
+      await _roomService.updatePlayerStatus(widget.roomId, _currentUserId!, true);
     } catch (e) {
       _showErrorMessage("Erreur: $e");
     }
@@ -155,8 +219,29 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   void _exitGame() {
     HapticFeedback.mediumImpact();
-    _firebaseService.removePlayerFromRoom(widget.roomId, _currentUserId!);
-    context.go(RouteList.home);
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text("Quitter la partie ?"),
+            content: const Text("Voulez-vous vraiment quitter cette partie ? Vous serez éliminé définitivement."),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _roomService.removePlayerFromRoom(widget.roomId, _currentUserId!);
+                  context.go(RouteList.home);
+                },
+                icon: const Icon(Icons.exit_to_app, size: 18),
+                label: const Text("QUITTER"),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+              ),
+            ],
+          ),
+    );
   }
 
   void _showErrorMessage(String message) {
@@ -167,6 +252,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(8),
+        action: SnackBarAction(label: 'OK', textColor: Colors.white, onPressed: () {}),
       ),
     );
   }
@@ -179,7 +265,53 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(8),
+        action: SnackBarAction(label: 'OK', textColor: Colors.white, onPressed: () {}),
       ),
+    );
+  }
+
+  void _showTutorialDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder:
+          (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.lightbulb, color: AppColors.secondary),
+                const SizedBox(width: 10),
+                const Text("Comment jouer ?"),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Bienvenue dans Pif Paf Pouf, le battle royale de Shifumi !"),
+                const Gap(10),
+                const Text("• Chaque joueur choisit un signe"),
+                const Text("• Les joueurs qui perdent sont éliminés"),
+                const Text("• Les tours continuent jusqu'à ce qu'il ne reste qu'un joueur"),
+                const Gap(10),
+                if (_extendedMode)
+                  const Text(
+                    "Vous jouez en mode étendu avec des choix supplémentaires !",
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                  ),
+                const Gap(15),
+                const Text("Bon jeu ! 🎮", style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            actions: [
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.check_circle),
+                label: const Text("COMPRIS !"),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              ),
+            ],
+          ),
     );
   }
 
@@ -204,19 +336,23 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            const Text(
-              "Regardez la suite du jeu en spectateur",
-              style: TextStyle(fontSize: 16, color: AppColors.textMuted),
-              textAlign: TextAlign.center,
+            const Gap(16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10)),
+              child: const Text(
+                "Regardez la suite du jeu en spectateur",
+                style: TextStyle(fontSize: 16, color: AppColors.textMuted),
+                textAlign: TextAlign.center,
+              ),
             ),
-            const SizedBox(height: 32),
+            const Gap(32),
             // Afficher les joueurs actifs restants et leur score
             if (_activePlayers.where((p) => p.active).isNotEmpty)
               Column(
                 children: [
-                  Text("Joueurs restants:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
+                  const Text("Joueurs restants:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Gap(8),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -225,10 +361,50 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                         _activePlayers
                             .where((p) => p.active)
                             .map(
-                              (p) => Chip(
-                                avatar: CircleAvatar(backgroundColor: AppColors.primary.withOpacity(0.2), child: Text(p.initial)),
-                                label: Text("${p.name} (${p.score} pts)"),
-                                backgroundColor: Colors.white,
+                              (p) => Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [AppColors.primary.withOpacity(0.7), AppColors.primary],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppColors.primary.withOpacity(0.3),
+                                      blurRadius: 5,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: Colors.white,
+                                      radius: 14,
+                                      child: Text(
+                                        p.initial,
+                                        style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const Gap(8),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.star, color: Colors.amber, size: 12),
+                                            const Gap(2),
+                                            Text("${p.score} pts", style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
                             )
                             .toList(),
@@ -246,26 +422,38 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (_selectedChoice != null) ...[
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  color: _selectedChoice!.color.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(60),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(15.0),
-                  child: Image.asset(_selectedChoice!.imagePath, fit: BoxFit.contain),
+              AnimatedBuilder(
+                animation: _floatingAnimController,
+                builder: (context, child) {
+                  return Transform.translate(offset: Offset(0, _floatingAnimController.value * -5), child: child);
+                },
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    color: _selectedChoice!.color.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(70),
+                    boxShadow: [BoxShadow(color: _selectedChoice!.color.withOpacity(0.3), blurRadius: 15, spreadRadius: 5)],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Image.asset(_selectedChoice!.imagePath, fit: BoxFit.contain),
+                  ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const Gap(24),
               Text(
                 "Vous avez choisi ${_selectedChoice!.displayName}",
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 32),
+              if (_selectedChoice!.description != null)
+                Text(
+                  _selectedChoice!.description!,
+                  style: TextStyle(fontSize: 16, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                ),
+              const Gap(32),
               StreamBuilder<List<GameChoice>>(
-                stream: _firebaseService.roundChoicesStream(widget.roomId, _room!.currentRound),
+                stream: _roomService.roundChoicesStream(widget.roomId, _room!.currentRound),
                 builder: (context, snapshot) {
                   final totalActive = _activePlayers.where((p) => p.active).length;
                   final choicesMade = snapshot.data?.length ?? 0;
@@ -276,20 +464,47 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                         alignment: Alignment.center,
                         children: [
                           SizedBox(
-                            width: 60,
-                            height: 60,
-                            child: CircularProgressIndicator(
-                              value: totalActive > 0 ? choicesMade / totalActive : 0,
-                              strokeWidth: 6,
-                              backgroundColor: Colors.grey.shade300,
-                              color: AppColors.primary,
+                            width: 80,
+                            height: 80,
+                            child: AnimatedBuilder(
+                              animation: _pulseAnimController,
+                              builder: (context, child) {
+                                return CircularProgressIndicator(
+                                  value: totalActive > 0 ? choicesMade / totalActive : 0,
+                                  strokeWidth: 8,
+                                  backgroundColor: Colors.grey.shade300,
+                                  color: AppColors.primary.withOpacity(0.5 + _pulseAnimController.value * 0.5),
+                                );
+                              },
                             ),
                           ),
-                          Text("$choicesMade/$totalActive", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          Column(
+                            children: [
+                              Text(
+                                "$choicesMade/$totalActive",
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                              Text("Joueurs", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            ],
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      const Text("En attente des autres joueurs...", style: TextStyle(fontSize: 16, color: AppColors.textMuted)),
+                      const Gap(16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.access_time, color: AppColors.primary, size: 18),
+                            const Gap(8),
+                            Text("En attente des autres joueurs...", style: TextStyle(fontSize: 14, color: AppColors.primary)),
+                          ],
+                        ),
+                      ),
                     ],
                   );
                 },
@@ -307,15 +522,30 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           width: double.infinity,
           margin: const EdgeInsets.symmetric(horizontal: 16),
           padding: const EdgeInsets.all(15),
-          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-          child: Text(
-            "Faites votre choix",
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.primary.withOpacity(0.6), AppColors.primary.withOpacity(0.2)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.touch_app, color: AppColors.primary),
+              Gap(10),
+              Text(
+                "Faites votre choix",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
         Padding(padding: const EdgeInsets.all(16.0), child: _buildChoicesGrid()),
-        const SizedBox(height: 24),
+        const Gap(16),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: AnimatedBuilder(
@@ -330,25 +560,24 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             },
           ),
         ),
-        const SizedBox(height: 16),
+        const Gap(16),
         if (_selectedChoice != null) ...[
-          const SizedBox(height: 32),
-          AnimationUtils.withTapEffect(
-            onTap: () => _confirmChoice(_selectedChoice!),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              decoration: BoxDecoration(
-                color: _selectedChoice!.color,
-                borderRadius: BorderRadius.circular(30),
-                boxShadow: [BoxShadow(color: _selectedChoice!.color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.check_circle, color: Colors.white),
-                  SizedBox(width: 8),
-                  Text("CONFIRMER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                ],
+          const Gap(24),
+          AnimatedBuilder(
+            animation: _pulseAnimController,
+            builder: (context, child) {
+              return Transform.scale(scale: 1.0 + (_pulseAnimController.value * 0.05), child: child);
+            },
+            child: ElevatedButton.icon(
+              onPressed: () => _confirmChoice(_selectedChoice!),
+              icon: const Icon(Icons.check_circle),
+              label: const Text("CONFIRMER", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _selectedChoice!.color,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                elevation: 5,
               ),
             ),
           ),
@@ -361,10 +590,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   Widget _buildChoicesGrid() {
     return GridView.builder(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+        crossAxisCount: _availableChoices.length <= 4 ? 2 : 3,
         childAspectRatio: 0.8,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
+        crossAxisSpacing: 15,
+        mainAxisSpacing: 15,
       ),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -388,34 +617,47 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(16),
           boxShadow:
               isSelected
-                  ? [BoxShadow(color: choice.color.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))]
+                  ? [BoxShadow(color: choice.color.withOpacity(0.5), blurRadius: 10, offset: const Offset(0, 5))]
                   : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
         ),
-        child: InkWell(
-          onTap: _choiceConfirmed ? null : () => _selectChoice(choice),
+        child: Material(
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(16)),
-                    padding: const EdgeInsets.all(8.0),
-                    child: Image.asset(choice.imagePath, fit: BoxFit.contain),
+          child: InkWell(
+            onTap: _choiceConfirmed ? null : () => _selectChoice(choice),
+            borderRadius: BorderRadius.circular(16),
+            splashColor: choice.color.withOpacity(0.2),
+            highlightColor: choice.color.withOpacity(0.1),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [choice.color.withOpacity(0.2), choice.color.withOpacity(0.4)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      padding: const EdgeInsets.all(12.0),
+                      child: Image.asset(choice.imagePath, fit: BoxFit.contain),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  choice.displayName,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    color: isSelected ? choice.color : Colors.black87,
+                  const Gap(8),
+                  Text(
+                    choice.displayName,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? choice.color : Colors.black87,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -457,45 +699,95 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             },
           ),
 
-          Text(
-            wasEliminated
-                ? "Vous avez été éliminé !"
-                : isPerfectTie
-                ? "Égalité parfaite ! Nouveau round..."
-                : "Vous survivez ce round !",
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors:
+                    wasEliminated
+                        ? [AppColors.error.withOpacity(0.7), AppColors.error]
+                        : isPerfectTie
+                        ? [Colors.amber.withOpacity(0.7), Colors.amber]
+                        : [AppColors.success.withOpacity(0.7), AppColors.success],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color:
+                      wasEliminated
+                          ? AppColors.error.withOpacity(0.3)
+                          : isPerfectTie
+                          ? Colors.amber.withOpacity(0.3)
+                          : AppColors.success.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Text(
+              wasEliminated
+                  ? "Vous avez été éliminé !"
+                  : isPerfectTie
+                  ? "Égalité parfaite ! Nouveau round..."
+                  : "Vous survivez ce round !",
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
           ),
 
           // Explication du score
           if (!wasEliminated && !isPerfectTie) ...[
-            const SizedBox(height: 8),
+            const Gap(12),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: AppColors.success.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-              child: const Text(
-                "+1 point pour avoir survécu !",
-                style: TextStyle(fontSize: 14, color: AppColors.success, fontWeight: FontWeight.bold),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.success.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.success.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_circle, color: AppColors.success, size: 16),
+                  const Gap(6),
+                  const Text(
+                    "1 point pour avoir survécu !",
+                    style: TextStyle(fontSize: 14, color: AppColors.success, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
             ),
           ],
 
           // Afficher le compte à rebours en cas d'égalité parfaite
           if (isPerfectTie) ...[
-            const SizedBox(height: 16),
+            const Gap(16),
             AnimatedBuilder(
               animation: _tieBreakerCountdownController,
               builder: (context, child) {
                 final countdown = 5 - (_tieBreakerCountdownController.value * 5).floor();
-                return Text(
-                  "Prochain round dans $countdown secondes",
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(30)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer, color: AppColors.primary, size: 18),
+                      const Gap(8),
+                      Text(
+                        "Prochain round dans $countdown secondes",
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
           ],
 
-          const SizedBox(height: 24),
+          const Gap(24),
 
           // Utiliser le visualiseur de duels pour afficher les résultats détaillés
           if (_roundResult!.playerChoices.isNotEmpty)
@@ -512,28 +804,27 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               ),
             ),
 
-          const SizedBox(height: 16),
+          const Gap(16),
 
           // Bouton pour continuer
           if (_isCurrentPlayerActive() && !isPerfectTie)
             Padding(
               padding: const EdgeInsets.only(bottom: 24),
-              child: AnimationUtils.withTapEffect(
-                onTap: _readyForNextRound,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(30),
-                    boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.play_arrow, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text("CONTINUER", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
+              child: AnimatedBuilder(
+                animation: _pulseAnimController,
+                builder: (context, child) {
+                  return Transform.scale(scale: 1.0 + (_pulseAnimController.value * 0.05), child: child);
+                },
+                child: ElevatedButton.icon(
+                  onPressed: _readyForNextRound,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text("CONTINUER", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    elevation: 5,
                   ),
                 ),
               ),
@@ -561,87 +852,147 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Lottie.asset(isWinner ? 'assets/lottie/win.json' : 'assets/lottie/lose.json', width: 200, height: 200),
-          const SizedBox(height: 24),
-          Text(
-            isWinner ? "VICTOIRE !" : "PERDU !",
-            style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: isWinner ? AppColors.success : AppColors.error),
+          const Gap(20),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors:
+                    isWinner
+                        ? [AppColors.success.withOpacity(0.7), AppColors.success]
+                        : [AppColors.error.withOpacity(0.7), AppColors.error],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: isWinner ? AppColors.success.withOpacity(0.3) : AppColors.error.withOpacity(0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Text(
+              isWinner ? "VICTOIRE !" : "PERDU !",
+              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
           ),
-          const SizedBox(height: 16),
-          Text(
-            isWinner ? "Félicitations, vous avez remporté la partie !" : "Dommage, vous avez perdu cette partie.",
-            style: const TextStyle(fontSize: 18),
-            textAlign: TextAlign.center,
+          const Gap(16),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 30),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))],
+            ),
+            child: Text(
+              isWinner ? "Félicitations, vous avez remporté la partie !" : "Dommage, vous avez perdu cette partie.",
+              style: TextStyle(fontSize: 18, color: Colors.grey.shade700),
+              textAlign: TextAlign.center,
+            ),
           ),
 
           // Afficher le meilleur score
           if (topScorer != null) ...[
-            const SizedBox(height: 24),
+            const Gap(30),
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.symmetric(horizontal: 30),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.amber.shade300, Colors.amber.shade500],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.amber.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))],
+              ),
               child: Column(
                 children: [
-                  const Text("Meilleur score", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      CircleAvatar(backgroundColor: AppColors.primary.withOpacity(0.2), child: Text(topScorer.initial)),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(topScorer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Row(
-                            children: [
-                              const Icon(Icons.star, color: Colors.amber, size: 16),
-                              const SizedBox(width: 4),
-                              Text(
-                                "${topScorer.score} points",
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                      Icon(Icons.emoji_events, color: Colors.white, size: 22),
+                      Gap(8),
+                      Text("MEILLEUR SCORE", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
                     ],
+                  ),
+                  const Gap(12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: AppColors.primary.withOpacity(0.2),
+                          radius: 22,
+                          child: Text(
+                            topScorer.initial,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                          ),
+                        ),
+                        const Gap(12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              topScorer.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.primary),
+                            ),
+                            Row(
+                              children: [
+                                const Icon(Icons.star, color: Colors.amber, size: 16),
+                                const Gap(4),
+                                Text(
+                                  "${topScorer.score} points",
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ],
 
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: () => context.go(RouteList.home),
-            icon: const Icon(Icons.home),
-            label: const Text('RETOUR À L\'ACCUEIL'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextButton.icon(
-            onPressed: () {
-              // Logique pour rejouer avec les mêmes joueurs
-              _firebaseService.createNewGameWithSamePlayers(widget.roomId).then((result) {
-                if (result['success'] && mounted) {
-                  // On ne navigue plus directement ici - la redirection se fera via le stream
+          const Gap(40),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () => context.go(RouteList.home),
+                icon: const Icon(Icons.home),
+                label: const Text('RETOUR À L\'ACCUEIL'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+              ),
+              const Gap(16),
+              ElevatedButton.icon(
+                onPressed: () {
                   _showInfoMessage("Création d'une nouvelle partie...");
-                } else {
-                  _showErrorMessage("Impossible de créer une nouvelle partie");
-                }
-              });
-            },
-            icon: const Icon(Icons.refresh),
-            label: const Text('REJOUER'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
+                  _roomService.createNewGameWithSamePlayers(widget.roomId);
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('REJOUER'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.secondary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -651,47 +1002,115 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   // Construire un widget qui affiche les règles du jeu
   Widget _buildRulesDialog() {
     return AlertDialog(
-      title: const Text("Règles du jeu", style: TextStyle(fontWeight: FontWeight.bold)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
+      title: const Row(
         children: [
-          for (var choice in _availableChoices) ...[
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-                  child: Image.asset(choice.imagePath),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(choice.displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    if (choice.beats.isNotEmpty)
-                      Text(
-                        "Bat: ${choice.beats.map((id) {
-                          final beatChoice = _gameRulesService.getChoiceById(id);
-                          return beatChoice?.displayName ?? id;
-                        }).join(', ')}",
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-            if (_availableChoices.last != choice) const Divider(),
-          ],
+          Icon(Icons.info_outline, color: AppColors.primary),
+          Gap(8),
+          Text("Règles du jeu", style: TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("FERMER"))],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var choice in _availableChoices) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: choice.color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 50,
+                      height: 50,
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: choice.color.withOpacity(0.2), borderRadius: BorderRadius.circular(25)),
+                      child: Image.asset(choice.imagePath),
+                    ),
+                    const Gap(12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(choice.displayName, style: TextStyle(fontWeight: FontWeight.bold, color: choice.color)),
+                          if (choice.beats.isNotEmpty)
+                            Row(
+                              children: [
+                                const Text("Bat: ", style: TextStyle(fontSize: 12)),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 4,
+                                    children:
+                                        choice.beats.map((id) {
+                                          final beatChoice = _gameRulesService.getChoiceById(id);
+                                          return Container(
+                                            margin: const EdgeInsets.only(top: 4),
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: beatChoice?.color.withOpacity(0.2) ?? Colors.grey.shade200,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              beatChoice?.displayName ?? id,
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: beatChoice?.color ?? Colors.grey,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_availableChoices.last != choice) const Divider(),
+            ],
+            const Gap(20),
+            const Text(
+              "Règle du Battle Royale: à chaque round, les joueurs dont le choix est battu par un autre sont éliminés. Le dernier joueur restant gagne la partie!",
+              style: TextStyle(fontStyle: FontStyle.italic, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.check_circle),
+          label: const Text("COMPRIS"),
+          style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+        ),
+      ],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Afficher un écran de chargement
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppColors.primaryLight,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Lottie.asset('assets/lottie/loading.json', width: 120, height: 120),
+              const Gap(20),
+              const Text("Chargement de la partie...", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+
     // Vérifier si la room a été supprimée
     if (_room == null) {
       return Scaffold(
@@ -702,12 +1121,16 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             children: [
               Lottie.asset('assets/lottie/error.json', width: 200, height: 200),
               const Text("Cette partie n'existe plus", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
+              const Gap(20),
               ElevatedButton.icon(
                 onPressed: () => context.go(RouteList.home),
                 icon: const Icon(Icons.home),
                 label: const Text('RETOUR À L\'ACCUEIL'),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
               ),
             ],
           ),
@@ -722,35 +1145,32 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text("Pif Paf Pouf", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-            Text("Round ${_room!.currentRound}", style: const TextStyle(fontSize: 14, color: Colors.white70)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(10)),
+              child: Text("Round ${_room!.currentRound}", style: const TextStyle(fontSize: 14, color: Colors.white70)),
+            ),
           ],
         ),
         centerTitle: true,
         backgroundColor: AppColors.primary,
-        leading: IconButton(
-          icon: const Icon(Icons.exit_to_app, color: Colors.white),
-          onPressed: () {
-            showDialog(
-              context: context,
-              builder:
-                  (context) => AlertDialog(
-                    title: const Text("Quitter la partie ?"),
-                    content: const Text("Voulez-vous vraiment quitter cette partie ? Vous serez éliminé définitivement."),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _exitGame();
-                        },
-                        child: Text("QUITTER", style: TextStyle(color: AppColors.error)),
-                      ),
-                    ],
-                  ),
-            );
-          },
-        ),
+        leading: IconButton(icon: const Icon(Icons.exit_to_app, color: Colors.white), onPressed: _exitGame),
         actions: [
+          // Indicateur de mode de jeu
+          if (_extendedMode)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+              child: Row(
+                children: [
+                  const Icon(Icons.extension, color: Colors.amber, size: 14),
+                  const Gap(4),
+                  const Text("Étendu", style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+
           // Bouton pour afficher les règles
           IconButton(
             icon: const Icon(Icons.help_outline, color: Colors.white),
@@ -758,35 +1178,28 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               showDialog(context: context, builder: (context) => _buildRulesDialog());
             },
           ),
+
           // Indicateur de joueurs actifs avec animation
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0.0, end: 1.0),
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.elasticOut,
-            builder: (context, value, child) {
-              return Transform.scale(scale: value, child: child);
-            },
-            child: Container(
-              margin: const EdgeInsets.only(right: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-              child: Row(
-                children: [
-                  const Icon(Icons.people, size: 16, color: Colors.white),
-                  const SizedBox(width: 4),
-                  Text(
-                    "${_activePlayers.where((p) => p.active).length}",
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
+          Container(
+            margin: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+            child: Row(
+              children: [
+                const Icon(Icons.people, size: 16, color: Colors.white),
+                const Gap(4),
+                Text(
+                  "${_activePlayers.where((p) => p.active).length}",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
           ),
         ],
       ),
       body: SafeArea(
         child: StreamBuilder<Room>(
-          stream: _firebaseService.roomStream(widget.roomId),
+          stream: _roomService.roomStream(widget.roomId),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting && _room == null) {
               return const Center(child: CircularProgressIndicator());
@@ -798,10 +1211,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.error_outline, size: 60, color: AppColors.error),
-                    const SizedBox(height: 16),
+                    const Gap(16),
                     Text("Erreur: ${snapshot.error}", style: TextStyle(color: AppColors.error), textAlign: TextAlign.center),
-                    const SizedBox(height: 24),
-                    ElevatedButton(onPressed: _exitGame, child: const Text("QUITTER LA PARTIE")),
+                    const Gap(24),
+                    ElevatedButton(
+                      onPressed: _exitGame,
+                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+                      child: const Text("QUITTER LA PARTIE"),
+                    ),
                   ],
                 ),
               );
@@ -820,7 +1237,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CircularProgressIndicator(),
-                      SizedBox(height: 20),
+                      Gap(20),
                       Text("Redirection vers la nouvelle partie...", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ],
                   ),
@@ -831,7 +1248,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
               // Mise à jour du joueur actuel
               if (_currentUserId != null) {
-                _currentPlayer = _activePlayers.firstWhere((p) => p.id == _currentUserId, orElse: () => _activePlayers.first);
+                _currentPlayer = _activePlayers.firstWhere(
+                  (p) => p.id == _currentUserId,
+                  orElse: () => _activePlayers.isNotEmpty ? _activePlayers.first : Player(id: '', name: 'Inconnu'),
+                );
               }
 
               // Vérifier si la partie est terminée
@@ -845,7 +1265,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   // Widget de statut des joueurs
                   Padding(
                     padding: const EdgeInsets.all(16.0),
-                    child: PlayerStatusWidget(players: _activePlayers, currentUserId: _currentUserId, showChoices: _showResults),
+                    child: PlayerStatusWidget(
+                      players: _activePlayers,
+                      currentUserId: _currentUserId,
+                      showChoices: _showResults,
+                      roundNumber: _room!.currentRound,
+                    ),
                   ),
                   // Contenu principal
                   Expanded(
@@ -853,7 +1278,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                       child: Column(
                         children: [
                           StreamBuilder<RoundResult?>(
-                            stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
+                            stream: _roomService.roundResultStream(widget.roomId, _room!.currentRound),
                             builder: (context, resultSnapshot) {
                               if (resultSnapshot.hasData && resultSnapshot.data!.resultAnnounced) {
                                 _roundResult = resultSnapshot.data;
@@ -880,10 +1305,71 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               );
             }
 
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  Gap(16),
+                  Text("Chargement de la partie...", style: TextStyle(fontSize: 16)),
+                ],
+              ),
+            );
           },
         ),
       ),
+      bottomSheet: _buildDeveloperModeToggle(),
     );
+  }
+
+  // Nouveau widget pour activer/désactiver le mode développeur (extension)
+  Widget _buildDeveloperModeToggle() {
+    // Seulement visible pour l'hôte et en mode développement
+    if (_room == null || !_isHost() || !kDebugMode) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Colors.black87,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.developer_mode, color: _extendedMode ? Colors.amber : Colors.grey, size: 18),
+              const Gap(8),
+              Text("Mode étendu", style: TextStyle(color: _extendedMode ? Colors.amber : Colors.grey)),
+            ],
+          ),
+          Switch(
+            value: _extendedMode,
+            activeColor: Colors.amber,
+            onChanged: (value) async {
+              bool success = await _firebaseService.roomService.toggleGameMode(widget.roomId, value);
+              if (success) {
+                setState(() {
+                  _extendedMode = value;
+                  _availableChoices = _gameRulesService.getActiveChoices(extendedMode: value);
+                });
+                if (value) {
+                  _showInfoMessage("Mode étendu activé ! De nouveaux choix sont disponibles.");
+                } else {
+                  _showInfoMessage("Mode étendu désactivé. Retour au mode classique.");
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Déterminer si le joueur actuel est l'hôte
+  bool _isHost() {
+    if (_room == null || _currentUserId == null) return false;
+    final currentPlayer = _room!.players.firstWhere(
+      (p) => p.id == _currentUserId,
+      orElse: () => Player(id: '', name: '', isHost: false),
+    );
+    return currentPlayer.isHost;
   }
 }

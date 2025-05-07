@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:pif_paf_pouf/data/models/models.dart';
+import 'package:pif_paf_pouf/data/models/game/game_choice_model.dart';
+import 'package:pif_paf_pouf/data/models/user/player.dart';
 import 'package:pif_paf_pouf/data/services/game_rules_service.dart';
 import 'package:pif_paf_pouf/presentation/theme/colors.dart';
+import 'package:gap/gap.dart';
+import 'package:lottie/lottie.dart';
 
 class DuelResultVisualizer extends StatelessWidget {
   final List<GameChoice> playerChoices;
@@ -33,8 +36,28 @@ class DuelResultVisualizer extends StatelessWidget {
     return SingleChildScrollView(
       child: Column(
         children: [
-          const Text("Résultats des duels", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.primary.withOpacity(0.7), AppColors.primary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))],
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sports_kabaddi, color: Colors.white, size: 20),
+                Gap(8),
+                Text("Résultats des duels", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              ],
+            ),
+          ),
+
           // Liste des duels
           ...playerChoices.asMap().entries.expand((entry) {
             final idx = entry.key;
@@ -69,12 +92,27 @@ class DuelResultVisualizer extends StatelessWidget {
               final isPlayer2Eliminated = eliminatedPlayers.contains(player2.id);
 
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                padding: const EdgeInsets.symmetric(vertical: 6.0),
                 child: Card(
-                  elevation: (player1.id == currentUserId || player2.id == currentUserId) ? 3 : 1,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
+                  elevation: (player1.id == currentUserId || player2.id == currentUserId) ? 4 : 1,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shadowColor:
+                      (player1.id == currentUserId || player2.id == currentUserId)
+                          ? AppColors.primary.withOpacity(0.5)
+                          : Colors.black.withOpacity(0.1),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient:
+                          (player1.id == currentUserId || player2.id == currentUserId)
+                              ? LinearGradient(
+                                colors: [AppColors.primaryLight, Colors.white],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                              : null,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    padding: const EdgeInsets.all(12.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -93,12 +131,21 @@ class DuelResultVisualizer extends StatelessWidget {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: _getDuelResultColor(duelResult).withOpacity(0.1),
+                            gradient: LinearGradient(
+                              colors: _getDuelResultGradient(duelResult),
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
                             shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: _getDuelResultColor(duelResult).withOpacity(0.3),
+                                blurRadius: 5,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          child: Center(
-                            child: Icon(_getDuelResultIcon(duelResult), color: _getDuelResultColor(duelResult), size: 20),
-                          ),
+                          child: Center(child: Icon(_getDuelResultIcon(duelResult), color: Colors.white, size: 20)),
                         ),
 
                         // Joueur 2
@@ -131,29 +178,63 @@ class DuelResultVisualizer extends StatelessWidget {
       children: [
         const Text(
           "Égalité parfaite !",
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 8),
-        const Text(
-          "Tous les joueurs ont choisi la même chose",
-          style: TextStyle(fontSize: 16, color: Colors.grey),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 20),
+        const Gap(10),
         Container(
-          width: 100,
-          height: 100,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.amber.withOpacity(0.3)),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.info_outline, color: Colors.amber, size: 16),
+              Gap(8),
+              Flexible(
+                child: Text("Tous les joueurs ont choisi la même chose", style: TextStyle(fontSize: 14, color: Colors.amber)),
+              ),
+            ],
+          ),
+        ),
+        const Gap(24),
+        Container(
+          width: 120,
+          height: 120,
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: choiceModel.color.withOpacity(0.2), shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [choiceModel.color.withOpacity(0.7), choiceModel.color.withOpacity(0.3)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: choiceModel.color.withOpacity(0.3), blurRadius: 15, spreadRadius: 5)],
+          ),
           child: Image.asset(choiceModel.imagePath, fit: BoxFit.contain),
         ),
-        const SizedBox(height: 12),
-        Text(choiceModel.displayName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: choiceModel.color)),
-        const SizedBox(height: 24),
+        const Gap(12),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: choiceModel.color.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: choiceModel.color.withOpacity(0.3)),
+          ),
+          child: Text(
+            choiceModel.displayName,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: choiceModel.color),
+          ),
+        ),
+        const Gap(30),
+        const Text("Joueurs à égalité :", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Gap(10),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 10,
+          runSpacing: 10,
           alignment: WrapAlignment.center,
           children:
               players.where((p) => playerChoices.any((c) => c.playerId == p.id)).map((player) {
@@ -161,19 +242,50 @@ class DuelResultVisualizer extends StatelessWidget {
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isCurrentUser ? AppColors.primary.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    player.name,
-                    style: TextStyle(
-                      fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                      color: isCurrentUser ? AppColors.primary : Colors.black87,
+                    gradient: LinearGradient(
+                      colors:
+                          isCurrentUser
+                              ? [AppColors.primary.withOpacity(0.7), AppColors.primary]
+                              : [Colors.grey.shade200, Colors.grey.shade300],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow:
+                        isCurrentUser
+                            ? [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 5, offset: const Offset(0, 2))]
+                            : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 12,
+                        backgroundColor: isCurrentUser ? Colors.white : AppColors.primary.withOpacity(0.2),
+                        child: Text(
+                          player.initial,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isCurrentUser ? AppColors.primary : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      const Gap(8),
+                      Text(
+                        player.name,
+                        style: TextStyle(
+                          fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
+                          color: isCurrentUser ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }).toList(),
         ),
+        const Gap(20),
+        FractionallySizedBox(widthFactor: 0.7, child: Lottie.asset('assets/lottie/tie.json', height: 100)),
       ],
     );
   }
@@ -197,9 +309,14 @@ class DuelResultVisualizer extends StatelessWidget {
                 height: 60,
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: choice.color.withOpacity(0.2),
+                  gradient: LinearGradient(
+                    colors: [choice.color.withOpacity(0.7), choice.color.withOpacity(0.3)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                   borderRadius: BorderRadius.circular(30),
                   border: Border.all(color: isCurrentUser ? AppColors.primary : Colors.transparent, width: isCurrentUser ? 2 : 0),
+                  boxShadow: [BoxShadow(color: choice.color.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 3))],
                 ),
                 child: Image.asset(choice.imagePath),
               ),
@@ -217,7 +334,7 @@ class DuelResultVisualizer extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 4),
+          const Gap(6),
           Text(
             playerName,
             style: TextStyle(
@@ -257,5 +374,10 @@ class DuelResultVisualizer extends StatelessWidget {
       case GameDuelResult.tie:
         return Colors.grey;
     }
+  }
+
+  List<Color> _getDuelResultGradient(GameDuelResult result) {
+    final baseColor = _getDuelResultColor(result);
+    return [baseColor.withOpacity(0.7), baseColor];
   }
 }

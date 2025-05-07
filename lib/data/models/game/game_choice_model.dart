@@ -9,6 +9,8 @@ class GameChoiceModel {
   final String svgPath; // Chemin vers l'SVG (si disponible)
   final Color color; // Couleur associée au choix
   final List<String> beats; // Liste des choix que ce choix bat
+  final String? description; // Description optionnelle du choix
+  final IconData? icon; // Icône optionnelle pour représenter le choix
 
   const GameChoiceModel({
     required this.id,
@@ -18,6 +20,8 @@ class GameChoiceModel {
     this.svgPath = '',
     required this.color,
     required this.beats,
+    this.description,
+    this.icon,
   });
 
   /// Vérifie si ce choix bat un autre choix
@@ -34,6 +38,8 @@ class GameChoiceModel {
     String? svgPath,
     Color? color,
     List<String>? beats,
+    String? description,
+    IconData? icon,
   }) {
     return GameChoiceModel(
       id: id ?? this.id,
@@ -43,6 +49,16 @@ class GameChoiceModel {
       svgPath: svgPath ?? this.svgPath,
       color: color ?? this.color,
       beats: beats ?? this.beats,
+      description: description ?? this.description,
+      icon: icon ?? this.icon,
     );
   }
+
+  // Pour faciliter la comparaison des choix
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is GameChoiceModel && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

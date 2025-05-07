@@ -17,6 +17,8 @@ class Room {
   final List<Player> players;
   final String? nextRoomId;
   final String? nextRoomCode;
+  final bool extendedMode;
+  final DateTime? lastActivity;
 
   Room({
     required this.id,
@@ -32,6 +34,8 @@ class Room {
     this.players = const [],
     this.nextRoomId,
     this.nextRoomCode,
+    this.extendedMode = false,
+    this.lastActivity,
   });
 
   // Factory pour créer un Room à partir d'un document Firestore
@@ -52,6 +56,8 @@ class Room {
       players: players,
       nextRoomId: data['nextRoomId'],
       nextRoomCode: data['nextRoomCode'],
+      extendedMode: data['extendedMode'] ?? false,
+      lastActivity: data['lastActivity'] != null ? (data['lastActivity'] as Timestamp).toDate() : null,
     );
   }
 
@@ -69,6 +75,8 @@ class Room {
       'survivors': survivors,
       'nextRoomId': nextRoomId,
       'nextRoomCode': nextRoomCode,
+      'extendedMode': extendedMode,
+      'lastActivity': lastActivity != null ? Timestamp.fromDate(lastActivity!) : FieldValue.serverTimestamp(),
     };
   }
 
@@ -86,6 +94,8 @@ class Room {
     List<Player>? players,
     String? nextRoomId,
     String? nextRoomCode,
+    bool? extendedMode,
+    DateTime? lastActivity,
   }) {
     return Room(
       id: id,
@@ -101,12 +111,22 @@ class Room {
       players: players ?? this.players,
       nextRoomId: nextRoomId ?? this.nextRoomId,
       nextRoomCode: nextRoomCode ?? this.nextRoomCode,
+      extendedMode: extendedMode ?? this.extendedMode,
+      lastActivity: lastActivity ?? this.lastActivity,
     );
   }
 
   bool get isReadyToStart {
     if (players.length < 2) return false;
     return players.every((player) => player.isReady);
+  }
+
+  // Détermine si la room est inactive depuis longtemps
+  bool get isInactive {
+    if (lastActivity == null) return false;
+    final now = DateTime.now();
+    // Considérer une room comme inactive après 2 heures
+    return now.difference(lastActivity!).inHours >= 2;
   }
 
   static RoomStatus _statusFromString(String status) {
@@ -132,4 +152,17 @@ class Room {
         return 'lobby';
     }
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Room &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          status == other.status &&
+          currentRound == other.currentRound &&
+          playerCount == other.playerCount;
+
+  @override
+  int get hashCode => id.hashCode ^ currentRound.hashCode ^ status.hashCode;
 }
