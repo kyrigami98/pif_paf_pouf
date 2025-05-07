@@ -210,6 +210,31 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               style: TextStyle(fontSize: 16, color: AppColors.textMuted),
               textAlign: TextAlign.center,
             ),
+            const SizedBox(height: 32),
+            // Afficher les joueurs actifs restants et leur score
+            if (_activePlayers.where((p) => p.active).isNotEmpty)
+              Column(
+                children: [
+                  Text("Joueurs restants:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.center,
+                    children:
+                        _activePlayers
+                            .where((p) => p.active)
+                            .map(
+                              (p) => Chip(
+                                avatar: CircleAvatar(backgroundColor: AppColors.primary.withOpacity(0.2), child: Text(p.initial)),
+                                label: Text("${p.name} (${p.score} pts)"),
+                                backgroundColor: Colors.white,
+                              ),
+                            )
+                            .toList(),
+                  ),
+                ],
+              ),
           ],
         ),
       );
@@ -442,6 +467,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             textAlign: TextAlign.center,
           ),
 
+          // Explication du score
+          if (!wasEliminated && !isPerfectTie) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: AppColors.success.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              child: const Text(
+                "+1 point pour avoir survécu !",
+                style: TextStyle(fontSize: 14, color: AppColors.success, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+
           // Afficher le compte à rebours en cas d'égalité parfaite
           if (isPerfectTie) ...[
             const SizedBox(height: 16),
@@ -507,6 +545,17 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   // Construire l'écran de fin de partie
   Widget _buildGameOverScreen(bool isWinner) {
+    // Trouver le joueur ayant le score le plus élevé
+    Player? topScorer;
+    int topScore = -1;
+
+    for (var player in _activePlayers) {
+      if (player.score > topScore) {
+        topScore = player.score;
+        topScorer = player;
+      }
+    }
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -523,6 +572,45 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             style: const TextStyle(fontSize: 18),
             textAlign: TextAlign.center,
           ),
+
+          // Afficher le meilleur score
+          if (topScorer != null) ...[
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  const Text("Meilleur score", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(backgroundColor: AppColors.primary.withOpacity(0.2), child: Text(topScorer.initial)),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(topScorer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Row(
+                            children: [
+                              const Icon(Icons.star, color: Colors.amber, size: 16),
+                              const SizedBox(width: 4),
+                              Text(
+                                "${topScorer.score} points",
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 32),
           ElevatedButton.icon(
             onPressed: () => context.go(RouteList.home),

@@ -7,6 +7,7 @@ class Player {
   final bool isHost;
   final bool active;
   final int wins;
+  final int score; // Nouveau champ pour les points dans la partie actuelle
   final DateTime? joinedAt;
   final String? currentChoice;
 
@@ -17,6 +18,7 @@ class Player {
     this.isHost = false,
     this.active = true,
     this.wins = 0,
+    this.score = 0, // Valeur par défaut
     this.joinedAt,
     this.currentChoice,
   });
@@ -31,6 +33,7 @@ class Player {
       isHost: data['isHost'] ?? false,
       active: data['active'] ?? true,
       wins: data['wins'] ?? 0,
+      score: data['score'] ?? 0, // Récupérer le score depuis Firestore
       joinedAt: data['joinedAt'] != null ? (data['joinedAt'] as Timestamp).toDate() : null,
       currentChoice: data['currentChoice'],
     );
@@ -44,6 +47,7 @@ class Player {
       'isHost': isHost,
       'active': active,
       'wins': wins,
+      'score': score, // Inclure le score dans les données à sauvegarder
       'joinedAt': joinedAt != null ? Timestamp.fromDate(joinedAt!) : FieldValue.serverTimestamp(),
       'currentChoice': currentChoice,
     };
@@ -56,6 +60,7 @@ class Player {
     bool? isHost,
     bool? active,
     int? wins,
+    int? score,
     DateTime? joinedAt,
     String? currentChoice,
   }) {
@@ -66,6 +71,7 @@ class Player {
       isHost: isHost ?? this.isHost,
       active: active ?? this.active,
       wins: wins ?? this.wins,
+      score: score ?? this.score,
       joinedAt: joinedAt ?? this.joinedAt,
       currentChoice: currentChoice ?? this.currentChoice,
     );

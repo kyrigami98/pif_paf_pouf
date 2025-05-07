@@ -116,7 +116,7 @@ class PlayerStatusWidget extends StatelessWidget {
 
   Widget _buildPlayersList(List<Player> playersList, {required bool isActive}) {
     return SizedBox(
-      height: 80,
+      height: 100,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: playersList.length,
@@ -226,6 +226,21 @@ class PlayerStatusWidget extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
+          ),
+
+          // Score du joueur
+          Container(
+            margin: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.star, size: 10, color: AppColors.primary),
+                SizedBox(width: 2),
+                Text("${player.score} pts", style: TextStyle(fontSize: 9, fontWeight: FontWeight.w500, color: AppColors.primary)),
+              ],
+            ),
           ),
 
           // Indicateur de choix ou statut

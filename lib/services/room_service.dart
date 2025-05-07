@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:pif_paf_pouf/models/models.dart';
-import 'package:pif_paf_pouf/models/game_choice_model.dart';
 import 'package:pif_paf_pouf/services/game_rules_service.dart';
 import 'dart:math';
 
@@ -398,9 +397,19 @@ class RoomService {
         'completedAt': FieldValue.serverTimestamp(),
       });
 
-      // Actualiser le statut 'active' des joueurs éliminés
-      for (String playerId in eliminated) {
-        await _firestore.collection('rooms').doc(roomId).collection('players').doc(playerId).update({'active': false});
+      // Obtenir les IDs des joueurs qui ont survécu à ce round
+      List<String> survivors = gameChoices.map((c) => c.playerId).where((id) => !eliminated.contains(id)).toList();
+
+      // Actualiser le statut 'active' des joueurs éliminés et ajouter des points aux survivants
+      for (String playerId in gameChoices.map((c) => c.playerId)) {
+        if (eliminated.contains(playerId)) {
+          await _firestore.collection('rooms').doc(roomId).collection('players').doc(playerId).update({'active': false});
+        } else if (!isPerfectTie) {
+          // Ajouter un point à chaque survivant si ce n'est pas une égalité parfaite
+          await _firestore.collection('rooms').doc(roomId).collection('players').doc(playerId).update({
+            'score': FieldValue.increment(1),
+          });
+        }
       }
 
       // Vérifier le nombre de joueurs encore actifs
@@ -416,6 +425,7 @@ class RoomService {
         await _firestore.collection('rooms').doc(roomId).update({
           'currentRound': currentRound + 1,
           'roundStartTime': FieldValue.serverTimestamp(),
+          'survivors': survivors, // Stocker les survivants pour référence
         });
 
         // Créer le document pour le prochain round
@@ -433,16 +443,17 @@ class RoomService {
         if (activePlayerCount == 1) {
           winner = playersSnapshot.docs.firstWhere((doc) => doc.data()['active'] == true).id;
 
-          // Incrémenter le nombre de victoires du gagnant
+          // Incrémenter le nombre de victoires et ajouter 5 points de bonus au gagnant
           await _firestore.collection('rooms').doc(roomId).collection('players').doc(winner).update({
             'wins': FieldValue.increment(1),
+            'score': FieldValue.increment(5), // Bonus pour avoir gagné la partie
           });
         }
 
-        await _firestore.collection('rooms').doc(roomId).update({'status': 'finished', 'winner': winner});
+        await _firestore.collection('rooms').doc(roomId).update({'status': 'finished', 'winner': winner, 'survivors': survivors});
       }
 
-      // Réinitialiser les choix des joueurs
+      // Réinitialiser les choix des joueurs pour le prochain round
       for (var doc in playersSnapshot.docs) {
         await doc.reference.update({'currentChoice': null, 'ready': false});
       }
@@ -532,12 +543,14 @@ class RoomService {
       // Ajouter tous les joueurs de l'ancienne room à la nouvelle
       for (final player in oldRoom.players) {
         // Réinitialiser isReady à false et active à true pour tous les joueurs
+        // Conserver les victoires mais réinitialiser le score
         await roomRef.collection('players').doc(player.id).set({
           'name': player.name,
           'ready': false,
           'isHost': player.isHost,
           'active': true,
-          'wins': player.wins, // Conserver les victoires
+          'wins': player.wins, // Conserver les victoires totales
+          'score': 0, // Réinitialiser le score pour la nouvelle partie
           'joinedAt': FieldValue.serverTimestamp(),
         });
       }
