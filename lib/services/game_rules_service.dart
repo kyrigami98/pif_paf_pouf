@@ -38,7 +38,6 @@ class GameRulesService {
         color: AppColors.scissors,
         beats: ['papier'],
       ),
-      // Pour ajouter de nouveaux choix à l'avenir :
       // GameChoiceModel(
       //   id: 'puit',
       //   name: 'puit',

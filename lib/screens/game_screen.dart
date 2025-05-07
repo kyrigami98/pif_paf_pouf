@@ -5,7 +5,6 @@ import 'package:lottie/lottie.dart';
 import 'package:pif_paf_pouf/app/app_keys.dart';
 import 'package:pif_paf_pouf/app/routes.dart';
 import 'package:pif_paf_pouf/models/models.dart';
-import 'package:pif_paf_pouf/models/game_choice_model.dart';
 import 'package:pif_paf_pouf/services/firebase_service.dart';
 import 'package:pif_paf_pouf/services/game_rules_service.dart';
 import 'package:pif_paf_pouf/theme/colors.dart';
@@ -279,13 +278,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
-          "Faites votre choix",
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          textAlign: TextAlign.center,
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+          child: Text(
+            "Faites votre choix",
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
         ),
-        const SizedBox(height: 16),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: _buildChoicesGrid()),
+        Padding(padding: const EdgeInsets.all(16.0), child: _buildChoicesGrid()),
         const SizedBox(height: 24),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -301,6 +305,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             },
           ),
         ),
+        const SizedBox(height: 16),
         if (_selectedChoice != null) ...[
           const SizedBox(height: 32),
           AnimationUtils.withTapEffect(
@@ -329,15 +334,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   // Construire une grille de choix qui s'adapte dynamiquement
   Widget _buildChoicesGrid() {
-    // Calcul du nombre de colonnes en fonction du nombre de choix
-    final int crossAxisCount = _availableChoices.length <= 3 ? 3 : (_availableChoices.length <= 6 ? 3 : 4);
-
     return GridView.builder(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
+        crossAxisCount: 3,
         childAspectRatio: 0.8,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -355,11 +357,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return AnimatedScale(
       scale: isSelected ? 1.1 : 1.0,
       duration: const Duration(milliseconds: 300),
-      child: Card(
-        elevation: isSelected ? 8 : 2,
-        shape: RoundedRectangleBorder(
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          side: isSelected ? BorderSide(color: choice.color, width: 3) : BorderSide.none,
+          boxShadow:
+              isSelected
+                  ? [BoxShadow(color: choice.color.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))]
+                  : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: InkWell(
           onTap: _choiceConfirmed ? null : () => _selectChoice(choice),
@@ -754,28 +759,33 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     padding: const EdgeInsets.all(16.0),
                     child: PlayerStatusWidget(players: _activePlayers, currentUserId: _currentUserId, showChoices: _showResults),
                   ),
-
                   // Contenu principal
                   Expanded(
-                    child: StreamBuilder<RoundResult?>(
-                      stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
-                      builder: (context, resultSnapshot) {
-                        if (resultSnapshot.hasData && resultSnapshot.data!.resultAnnounced) {
-                          _roundResult = resultSnapshot.data;
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          StreamBuilder<RoundResult?>(
+                            stream: _firebaseService.roundResultStream(widget.roomId, _room!.currentRound),
+                            builder: (context, resultSnapshot) {
+                              if (resultSnapshot.hasData && resultSnapshot.data!.resultAnnounced) {
+                                _roundResult = resultSnapshot.data;
 
-                          // Ne pas montrer les résultats s'ils ont déjà été vus et que le joueur est prêt pour le prochain round
-                          if (_showResults == false && _currentPlayer?.isReady == true) {
-                            return _buildChoiceUI();
-                          } else {
-                            // Autrement, montrer les résultats
-                            _showResults = true;
-                            return _buildResultsUI();
-                          }
-                        }
+                                // Ne pas montrer les résultats s'ils ont déjà été vus et que le joueur est prêt pour le prochain round
+                                if (_showResults == false && _currentPlayer?.isReady == true) {
+                                  return _buildChoiceUI();
+                                } else {
+                                  // Autrement, montrer les résultats
+                                  _showResults = true;
+                                  return _buildResultsUI();
+                                }
+                              }
 
-                        // Si pas de résultats, montrer l'interface de choix
-                        return _buildChoiceUI();
-                      },
+                              // Si pas de résultats, montrer l'interface de choix
+                              return _buildChoiceUI();
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
